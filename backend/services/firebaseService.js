@@ -1,0 +1,333 @@
+// services/firebaseService.js - Firebase RTDB Operations
+const { ref, serverTimestamp, admin } = require('../firebase/admin');
+const { DB_PATHS, DEFAULT_SETTINGS } = require('../config/constants');
+const logger = require('../utils/logger');
+
+/**
+ * =============================
+ * USER OPERATIONS
+ * =============================
+ */
+
+/**
+ * Get user by UID
+ */
+async function getUser(uid) {
+  const snap = await ref(`${DB_PATHS.USERS}/${uid}`).once('value');
+  return snap.exists() ? { uid, ...snap.val() } : null;
+}
+
+/**
+ * Create or update user on login
+ */
+async function upsertUser(uid, data) {
+  const userRef = ref(`${DB_PATHS.USERS}/${uid}`);
+  const snap = await userRef.once('value');
+
+  if (!snap.exists()) {
+    // New user
+    await userRef.set({
+      uid,
+      email: data.email,
+      displayName: data.displayName || '',
+      photoURL: data.photoURL || '',
+      role: 'user',
+      wallet: { balance: 0, lastUpdated: serverTimestamp() },
+      isActive: true,
+      isBanned: false,
+      createdAt: serverTimestamp(),
+      lastLoginAt: serverTimestamp(),
+    });
+  } else {
+    // Existing user - update last login
+    await userRef.update({
+      displayName: data.displayName || snap.val().displayName,
+      photoURL: data.photoURL || snap.val().photoURL,
+      lastLoginAt: serverTimestamp(),
+    });
+  }
+
+  const updated = await userRef.once('value');
+  return { uid, ...updated.val() };
+}
+
+/**
+ * Update user profile
+ */
+async function updateUserProfile(uid, data) {
+  const allowed = ['displayName', 'phone', 'upiId', 'bankDetails'];
+  const update = {};
+  allowed.forEach((key) => {
+    if (data[key] !== undefined) update[key] = data[key];
+  });
+  update.updatedAt = serverTimestamp();
+  await ref(`${DB_PATHS.USERS}/${uid}`).update(update);
+}
+
+/**
+ * Get all users (admin)
+ */
+async function getAllUsers() {
+  const snap = await ref(DB_PATHS.USERS).once('value');
+  if (!snap.exists()) return [];
+  const users = [];
+  snap.forEach((child) => {
+    const user = child.val();
+    // Remove sensitive wallet internals for list view
+    users.push({
+      uid: child.key,
+      email: user.email,
+      displayName: user.displayName,
+      photoURL: user.photoURL,
+      role: user.role,
+      walletBalance: user.wallet?.balance || 0,
+      isActive: user.isActive,
+      isBanned: user.isBanned,
+      createdAt: user.createdAt,
+      lastLoginAt: user.lastLoginAt,
+    });
+  });
+  return users.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/**
+ * Ban or unban user
+ */
+async function setBanStatus(uid, isBanned) {
+  await ref(`${DB_PATHS.USERS}/${uid}`).update({ isBanned, updatedAt: serverTimestamp() });
+}
+
+/**
+ * =============================
+ * PAYMENT OPERATIONS
+ * =============================
+ */
+
+/**
+ * Create a payment record
+ */
+async function createPayment(orderId, data) {
+  await ref(`${DB_PATHS.PAYMENTS}/${orderId}`).set({
+    orderId,
+    userId: data.userId,
+    amount: parseFloat(data.amount),
+    status: 'pending',
+    remark: data.remark || '',
+    customerMobile: data.customerMobile || '',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    environment: null,
+  });
+}
+
+/**
+ * Update payment status (webhook)
+ */
+async function updatePaymentStatus(orderId, data) {
+  await ref(`${DB_PATHS.PAYMENTS}/${orderId}`).update({
+    status: data.status === 'Success' ? 'success' : 'failed',
+    txnId: data.txn_id || '',
+    utr: data.utr || '',
+    payAmount: parseFloat(data.pay_amount || data.amount || 0),
+    environment: data.environment || 'cashier',
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Get payment by orderId
+ */
+async function getPayment(orderId) {
+  const snap = await ref(`${DB_PATHS.PAYMENTS}/${orderId}`).once('value');
+  return snap.exists() ? snap.val() : null;
+}
+
+/**
+ * Get payments by userId
+ */
+async function getUserPayments(userId, limit = 50) {
+  const snap = await ref(DB_PATHS.PAYMENTS)
+    .orderByChild('userId')
+    .equalTo(userId)
+    .limitToLast(limit)
+    .once('value');
+
+  if (!snap.exists()) return [];
+  const payments = [];
+  snap.forEach((child) => payments.push(child.val()));
+  return payments.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/**
+ * Get all payments (admin)
+ */
+async function getAllPayments(limit = 100) {
+  const snap = await ref(DB_PATHS.PAYMENTS)
+    .orderByChild('createdAt')
+    .limitToLast(limit)
+    .once('value');
+  if (!snap.exists()) return [];
+  const payments = [];
+  snap.forEach((child) => payments.push(child.val()));
+  return payments.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/**
+ * Check if order was already processed (duplicate prevention)
+ */
+async function isOrderProcessed(orderId) {
+  const snap = await ref(`${DB_PATHS.PROCESSED_ORDERS}/${orderId}`).once('value');
+  return snap.exists();
+}
+
+/**
+ * Mark order as processed
+ */
+async function markOrderProcessed(orderId) {
+  await ref(`${DB_PATHS.PROCESSED_ORDERS}/${orderId}`).set(serverTimestamp());
+}
+
+/**
+ * =============================
+ * WITHDRAWAL OPERATIONS
+ * =============================
+ */
+
+/**
+ * Create withdrawal request
+ */
+async function createWithdrawal(userId, data) {
+  const withdrawalRef = ref(DB_PATHS.WITHDRAWALS).push();
+  const id = withdrawalRef.key;
+  await withdrawalRef.set({
+    id,
+    userId,
+    amount: parseFloat(data.amount),
+    commission: parseFloat(data.commission),
+    netAmount: parseFloat(data.netAmount),
+    upiId: data.upiId,
+    accountName: data.accountName || '',
+    status: 'pending',
+    adminNote: '',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return id;
+}
+
+/**
+ * Update withdrawal status (admin)
+ */
+async function updateWithdrawalStatus(withdrawalId, status, adminNote = '') {
+  await ref(`${DB_PATHS.WITHDRAWALS}/${withdrawalId}`).update({
+    status,
+    adminNote,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Get user withdrawals
+ */
+async function getUserWithdrawals(userId) {
+  const snap = await ref(DB_PATHS.WITHDRAWALS)
+    .orderByChild('userId')
+    .equalTo(userId)
+    .once('value');
+  if (!snap.exists()) return [];
+  const list = [];
+  snap.forEach((child) => list.push(child.val()));
+  return list.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/**
+ * Get all withdrawals (admin)
+ */
+async function getAllWithdrawals() {
+  const snap = await ref(DB_PATHS.WITHDRAWALS).once('value');
+  if (!snap.exists()) return [];
+  const list = [];
+  snap.forEach((child) => list.push(child.val()));
+  return list.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/**
+ * Get withdrawal by ID
+ */
+async function getWithdrawal(withdrawalId) {
+  const snap = await ref(`${DB_PATHS.WITHDRAWALS}/${withdrawalId}`).once('value');
+  return snap.exists() ? snap.val() : null;
+}
+
+/**
+ * =============================
+ * PLATFORM SETTINGS
+ * =============================
+ */
+
+/**
+ * Get platform settings (with defaults)
+ */
+async function getSettings() {
+  const snap = await ref(DB_PATHS.SETTINGS).once('value');
+  if (!snap.exists()) return DEFAULT_SETTINGS;
+  return { ...DEFAULT_SETTINGS, ...snap.val() };
+}
+
+/**
+ * Update platform settings (admin)
+ */
+async function updateSettings(data) {
+  await ref(DB_PATHS.SETTINGS).update({
+    ...data,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * =============================
+ * ACTIVITY LOG
+ * =============================
+ */
+
+/**
+ * Log an activity
+ */
+async function logActivity(userId, action, details = {}) {
+  const logRef = ref(DB_PATHS.ACTIVITY_LOGS).push();
+  await logRef.set({
+    userId,
+    action,
+    details,
+    timestamp: serverTimestamp(),
+    ip: details.ip || '',
+  });
+}
+
+module.exports = {
+  // Users
+  getUser,
+  upsertUser,
+  updateUserProfile,
+  getAllUsers,
+  setBanStatus,
+  // Payments
+  createPayment,
+  updatePaymentStatus,
+  getPayment,
+  getUserPayments,
+  getAllPayments,
+  isOrderProcessed,
+  markOrderProcessed,
+  // Withdrawals
+  createWithdrawal,
+  updateWithdrawalStatus,
+  getUserWithdrawals,
+  getAllWithdrawals,
+  getWithdrawal,
+  // Settings
+  getSettings,
+  updateSettings,
+  // Logs
+  logActivity,
+};
