@@ -1,132 +1,100 @@
-// webhooks/zapWebhook.js - Zap UPI Webhook Handler
-// CRITICAL: This processes real money transactions
-const firebaseService = require('../services/firebaseService');
-const walletService = require('../services/walletService');
+// webhooks/zapWebhook.js - Commission + Payment Link aware webhook
+const firebaseService     = require('../services/firebaseService');
+const walletService       = require('../services/walletService');
 const notificationService = require('../services/notificationService');
-const zapService = require('../services/zapService');
-const logger = require('../utils/logger');
+const subscriptionService = require('../services/subscriptionService');
+const zapService          = require('../services/zapService');
+const { ref }             = require('../firebase/admin');
+const { DB_PATHS }        = require('../config/constants');
+const logger              = require('../utils/logger');
 
-/**
- * Handle incoming webhook from Zap UPI
- * 
- * Zap UPI webhook payload:
- * {
- *   order_id, txn_id, status, amount, pay_amount,
- *   utr, customer_mobile, remark, remark_array, create_at, environment
- * }
- * 
- * SECURITY RULES:
- * 1. Never trust webhook blindly - verify via order-status API
- * 2. Prevent duplicate processing using processedOrders
- * 3. Never credit wallet for test environment
- */
 async function handleZapWebhook(req, res) {
-  // ALWAYS respond 200 immediately to Zap (prevents retries while processing)
   res.status(200).json({ status: 'ok' });
-
   const { order_id, status, txn_id, amount, pay_amount, utr, environment } = req.body;
-
-  logger.info(`Webhook received: orderId=${order_id}, status=${status}, env=${environment}`);
-
-  // Ignore non-success webhooks (we track failures too but don't credit)
-  if (!order_id) {
-    logger.warn('Webhook received without order_id');
-    return;
-  }
-
-  // Process asynchronously after responding
+  if (!order_id) { logger.warn('Webhook: missing order_id'); return; }
+  logger.info(`Webhook: orderId=${order_id} status=${status}`);
   processWebhookAsync({ order_id, status, txn_id, amount, pay_amount, utr, environment });
 }
 
-async function processWebhookAsync({ order_id, status, txn_id, amount, pay_amount, utr, environment }) {
+async function processWebhookAsync(data) {
+  const { order_id, status, txn_id, amount, pay_amount, utr, environment } = data;
   try {
-    // 1. Check if already processed (duplicate prevention)
-    const alreadyProcessed = await firebaseService.isOrderProcessed(order_id);
-    if (alreadyProcessed) {
-      logger.warn(`Duplicate webhook ignored: ${order_id}`);
-      return;
+    if (await firebaseService.isOrderProcessed(order_id)) {
+      logger.warn(`Duplicate webhook ignored: ${order_id}`); return;
     }
 
-    // 2. Get payment record from DB
     const payment = await firebaseService.getPayment(order_id);
-    if (!payment) {
-      logger.error(`Payment not found in DB: ${order_id}`);
-      return;
-    }
+    if (!payment) { logger.error(`Payment not found: ${order_id}`); return; }
 
-    // 3. SECURITY: Verify with Zap API (don't trust webhook alone)
     let verifiedStatus = status;
     try {
-      const apiStatus = await zapService.getOrderStatus(order_id);
-      verifiedStatus = apiStatus.status || status;
-      logger.info(`API verification for ${order_id}: ${verifiedStatus}`);
-    } catch (verifyErr) {
-      logger.warn(`Could not verify via API for ${order_id}: ${verifyErr.message}. Using webhook status.`);
-    }
+      const api = await zapService.getOrderStatus(order_id);
+      verifiedStatus = api.status || status;
+    } catch (e) { logger.warn(`API verify failed: ${e.message}`); }
 
-    // 4. Update payment record in DB
-    await firebaseService.updatePaymentStatus(order_id, {
-      status: verifiedStatus,
-      txn_id,
-      utr,
-      amount,
-      pay_amount,
-      environment,
-    });
-
-    // 5. Mark as processed BEFORE crediting (prevents double credit)
+    await firebaseService.updatePaymentStatus(order_id, { status: verifiedStatus, txn_id, utr, amount, pay_amount, environment });
     await firebaseService.markOrderProcessed(order_id);
 
-    // 6. If payment successful, credit wallet
-    if (verifiedStatus === 'Success') {
-      const creditAmount = parseFloat(pay_amount || amount || 0);
-
-      if (creditAmount <= 0) {
-        logger.error(`Invalid credit amount for ${order_id}: ${creditAmount}`);
-        return;
+    if (verifiedStatus !== 'Success') {
+      if (verifiedStatus === 'Failed') {
+        await notificationService.createNotification(payment.userId, {
+          title: 'Payment Failed', message: `Payment of Rs.${amount} failed. Order: ${order_id}`, type: 'payment',
+        });
       }
+      return;
+    }
 
-      // Credit wallet using Firebase transaction
-      const newBalance = await walletService.creditWallet(
-        payment.userId,
-        creditAmount,
-        `Payment ${order_id}`
-      );
+    const grossAmount = parseFloat(pay_amount || amount || 0);
+    if (grossAmount <= 0) { logger.error(`Invalid amount ${order_id}`); return; }
 
-      logger.info(`Wallet credited: User=${payment.userId}, Amount=₹${creditAmount}, NewBalance=₹${newBalance}`);
+    const isLinkPayment = !!(payment.linkId);
+    const sub     = await subscriptionService.getUserSubscription(payment.userId);
+    const plan    = sub.plan;
+    const commPct = isLinkPayment ? (payment.commissionPercent ?? plan.commissionPercent) : 0;
+    const commission = Math.round(grossAmount * commPct * 100) / 10000;
+    const netAmount  = Math.round((grossAmount - commission) * 100) / 100;
 
-      // Send success notification
-      await notificationService.notifyPaymentSuccess(
-        payment.userId,
-        creditAmount,
-        order_id
-      );
-
-      // Log activity
-      await firebaseService.logActivity(payment.userId, 'PAYMENT_SUCCESS', {
-        orderId: order_id,
-        amount: creditAmount,
-        utr,
-        environment,
-      });
-
-    } else if (verifiedStatus === 'Failed') {
-      // Send failure notification
+    const currentBalance = await walletService.getBalance(payment.userId);
+    const available = plan.walletLimit - currentBalance;
+    if (available <= 0) {
       await notificationService.createNotification(payment.userId, {
-        title: '❌ Payment Failed',
-        message: `Your payment of ₹${amount} could not be processed. Order: ${order_id}`,
-        type: 'payment',
+        title: 'Wallet Full', message: `Payment of Rs.${grossAmount} received but wallet is full (limit Rs.${plan.walletLimit}). Withdraw first.`, type: 'payment',
       });
+      return;
+    }
 
-      await firebaseService.logActivity(payment.userId, 'PAYMENT_FAILED', {
-        orderId: order_id,
-        amount,
-        environment,
+    const creditAmount = Math.min(netAmount, available);
+    const newBalance = await walletService.creditWallet(payment.userId, creditAmount, `Order ${order_id}`);
+    logger.info(`Credited ${payment.userId}: +Rs.${creditAmount}`);
+
+    if (isLinkPayment && commission > 0) {
+      const logRef = ref(DB_PATHS.COMMISSION_LOGS).push();
+      await logRef.set({
+        id: logRef.key, userId: payment.userId, linkId: payment.linkId,
+        orderId: order_id, grossAmount, commission, netAmount: creditAmount,
+        commissionPercent: commPct, planId: plan.id, planName: plan.name, createdAt: Date.now(),
+      });
+      await ref(`${DB_PATHS.PAYMENT_LINKS}/${payment.linkId}`).transaction((link) => {
+        if (!link) return link;
+        return { ...link, paymentCount: (link.paymentCount||0)+1, totalCollected: (link.totalCollected||0)+grossAmount, lastPaidAt: Date.now() };
       });
     }
 
+    const msg = isLinkPayment
+      ? `Rs.${creditAmount} credited (Rs.${grossAmount} - Rs.${commission} commission). Order: ${order_id}`
+      : `Rs.${creditAmount} added to your wallet. Order: ${order_id}`;
+
+    await notificationService.createNotification(payment.userId, {
+      title: isLinkPayment ? 'Payment Received via Link' : 'Wallet Credited',
+      message: msg, type: 'payment',
+    });
+
+    await firebaseService.logActivity(payment.userId, 'PAYMENT_SUCCESS', {
+      orderId: order_id, grossAmount, commission, netAmount: creditAmount, linkId: payment.linkId || null, utr,
+    });
+
   } catch (err) {
-    logger.error(`Webhook processing error for ${order_id}:`, err.message);
+    logger.error(`Webhook error for ${order_id}:`, err.message);
   }
 }
 
