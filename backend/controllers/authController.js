@@ -1,24 +1,24 @@
-// controllers/authController.js - Authentication Controller
+// controllers/authController.js
 const jwt = require('jsonwebtoken');
 const { getAuth } = require('../firebase/admin');
 const firebaseService = require('../services/firebaseService');
 const response = require('../helpers/response');
 const logger = require('../utils/logger');
-const { ROLES } = require('../config/constants');
 
 /**
  * POST /api/auth/google
- * Verify Google Firebase ID token, upsert user, return JWT
+ * Works for ALL Firebase auth methods:
+ * - Google Sign-In
+ * - Email/Password Sign-In
+ * - Email/Password Register
+ * Firebase issues same ID token format for all methods.
  */
 const googleAuth = async (req, res) => {
   try {
     const { idToken } = req.body;
+    if (!idToken) return response.error(res, 'Firebase ID token is required');
 
-    if (!idToken) {
-      return response.error(res, 'Firebase ID token is required');
-    }
-
-    // Verify Firebase ID token
+    // Verify Firebase ID token (works for any Firebase auth provider)
     let decodedToken;
     try {
       decodedToken = await getAuth().verifyIdToken(idToken);
@@ -27,25 +27,26 @@ const googleAuth = async (req, res) => {
       return response.unauthorized(res, 'Invalid or expired token. Please sign in again.');
     }
 
-    const { uid, email, name, picture } = decodedToken;
+    const { uid, email, name, picture, firebase } = decodedToken;
 
-    // Check if user is banned before creating session
+    // Check maintenance mode
+    const settings = await firebaseService.getSettings();
     const existingUser = await firebaseService.getUser(uid);
+
     if (existingUser?.isBanned) {
       return response.forbidden(res, 'Your account has been suspended. Contact support.');
     }
 
-    // Check maintenance mode
-    const settings = await firebaseService.getSettings();
-    if (settings.maintenanceMode && existingUser?.role !== ROLES.ADMIN) {
+    if (settings.maintenanceMode && existingUser?.role !== 'admin') {
       return response.error(res, 'Platform is under maintenance. Please try again later.', 503);
     }
 
-    // Create or update user in Firebase RTDB
+    // Upsert user — works for both Google and Email/Password
     const user = await firebaseService.upsertUser(uid, {
       email,
-      displayName: name || email,
+      displayName: name || email?.split('@')[0] || 'User',
       photoURL: picture || '',
+      authProvider: firebase?.sign_in_provider || 'unknown',
     });
 
     // Generate JWT
@@ -55,13 +56,12 @@ const googleAuth = async (req, res) => {
       { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
     );
 
-    // Log activity
     await firebaseService.logActivity(uid, 'LOGIN', {
-      method: 'google',
+      method: firebase?.sign_in_provider || 'unknown',
       ip: req.ip,
     });
 
-    logger.info(`User logged in: ${email} (${uid})`);
+    logger.info(`User logged in: ${email} [${firebase?.sign_in_provider}]`);
 
     return response.success(res, 'Login successful', {
       token,
@@ -75,21 +75,17 @@ const googleAuth = async (req, res) => {
       },
     });
   } catch (err) {
-    logger.error('Google auth error:', err.message);
+    logger.error('Auth error:', err.message);
     return response.serverError(res, 'Authentication failed. Please try again.');
   }
 };
 
-/**
- * GET /api/auth/me
- * Get current authenticated user
- */
+/** GET /api/auth/me */
 const getMe = async (req, res) => {
   try {
     const user = await firebaseService.getUser(req.user.uid);
     if (!user) return response.notFound(res, 'User not found');
-
-    return response.success(res, 'User data fetched', {
+    return response.success(res, 'User fetched', {
       uid: user.uid,
       email: user.email,
       displayName: user.displayName,
@@ -99,24 +95,19 @@ const getMe = async (req, res) => {
       role: user.role,
       walletBalance: user.wallet?.balance || 0,
       createdAt: user.createdAt,
+      lastLoginAt: user.lastLoginAt,
     });
   } catch (err) {
-    logger.error('Get me error:', err.message);
     return response.serverError(res);
   }
 };
 
-/**
- * POST /api/auth/logout
- * Logout (JWT is stateless; just log the activity)
- */
+/** POST /api/auth/logout */
 const logout = async (req, res) => {
   try {
     await firebaseService.logActivity(req.user.uid, 'LOGOUT', { ip: req.ip });
-    return response.success(res, 'Logged out successfully');
-  } catch (err) {
-    return response.success(res, 'Logged out');
-  }
+  } catch {}
+  return response.success(res, 'Logged out successfully');
 };
 
 module.exports = { googleAuth, getMe, logout };
