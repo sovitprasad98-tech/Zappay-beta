@@ -5,6 +5,7 @@ const walletService = require('../services/walletService');
 const notificationService = require('../services/notificationService');
 const response = require('../helpers/response');
 const logger = require('../utils/logger');
+const subscriptionService = require('../services/subscriptionService');
 
 /**
  * POST /api/withdrawal/request
@@ -23,8 +24,10 @@ const requestWithdrawal = async (req, res) => {
 
     // Get platform settings
     const settings = await firebaseService.getSettings();
+    const sub = await subscriptionService.getUserSubscription(userId);
+    const plan = sub.plan;
     const minWithdrawal = settings.minWithdrawal || 100;
-    const commissionPercent = settings.commissionPercent || 5;
+    const commissionPercent = plan.commissionPercent ?? settings.commissionPercent ?? 5;
 
     if (settings.maintenanceMode) {
       return response.error(res, 'Withdrawal system under maintenance.', 503);
