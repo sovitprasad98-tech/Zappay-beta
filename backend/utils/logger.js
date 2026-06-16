@@ -1,6 +1,5 @@
-// utils/logger.js - Winston Logger
+// utils/logger.js
 const winston = require('winston');
-const path = require('path');
 
 const logFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
@@ -12,6 +11,8 @@ const logFormat = winston.format.combine(
   })
 );
 
+// ⚠️ Vercel serverless has NO writable filesystem
+// Only use Console transport — no File transports
 const transports = [
   new winston.transports.Console({
     format: winston.format.combine(
@@ -21,23 +22,8 @@ const transports = [
   }),
 ];
 
-// Add file transports in production
-if (process.env.NODE_ENV === 'production') {
-  transports.push(
-    new winston.transports.File({
-      filename: path.join('logs', 'error.log'),
-      level: 'error',
-      format: logFormat,
-    }),
-    new winston.transports.File({
-      filename: path.join('logs', 'combined.log'),
-      format: logFormat,
-    })
-  );
-}
-
 const logger = winston.createLogger({
-  level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+  level: 'info',
   transports,
 });
 
