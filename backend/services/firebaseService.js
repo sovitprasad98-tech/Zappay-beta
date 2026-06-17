@@ -114,7 +114,9 @@ async function createPayment(orderId, data) {
     status: 'pending',
     remark: data.remark || '',
     customerMobile: data.customerMobile || '',
-    linkId: data.linkId || null,          // null = direct payment, string = payment link
+    linkId: data.linkId || null,
+    type: data.type || 'wallet_topup',
+    planId: data.planId || null,
     commissionPercent: data.commissionPercent || null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
