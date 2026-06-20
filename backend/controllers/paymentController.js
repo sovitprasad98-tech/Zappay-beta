@@ -110,6 +110,8 @@ const getPaymentStatus = async (req, res) => {
       orderId: payment.orderId,
       amount: payment.amount,
       status: payment.status,
+      type: payment.type,
+      planId: payment.planId,
       txnId: payment.txnId || '',
       utr: payment.utr || '',
       createdAt: payment.createdAt,

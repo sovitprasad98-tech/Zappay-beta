@@ -25,7 +25,7 @@ const createPaymentLink = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return response.error(res, 'Validation failed', 400, errors.array());
 
-    const { amount, title, description } = req.body;
+    const { amount, title, description, redirectUrl } = req.body;
     const userId = req.user.uid;
 
     // 1. Get user's subscription + plan
@@ -75,6 +75,7 @@ const createPaymentLink = async (req, res) => {
       merchantName: user?.displayName || 'Merchant',
       title: title.trim(),
       description: description?.trim() || '',
+      redirectUrl: redirectUrl?.trim() || '',
       amount: parseFloat(amount),
       status: 'active',
       expiresAt,
@@ -93,7 +94,7 @@ const createPaymentLink = async (req, res) => {
     await subscriptionService.incrementLinkCount(userId);
 
     // 9. Build public URL
-    const publicUrl = `${process.env.FRONTEND_URL}/pay.php?id=${linkId}`;
+    const publicUrl = `${process.env.FRONTEND_URL}/pay.html?id=${linkId}`;
 
     logger.info(`Payment link created: ${linkId} by ${userId}`);
 
@@ -102,6 +103,7 @@ const createPaymentLink = async (req, res) => {
       publicUrl,
       amount: linkData.amount,
       title: linkData.title,
+      redirectUrl: linkData.redirectUrl,
       expiresAt,
       linksRemaining: plan.paymentLinksPerMonth === -1
         ? 'Unlimited'
@@ -179,6 +181,7 @@ const getLinkPublic = async (req, res) => {
       amount: link.amount,
       expiresAt: link.expiresAt,
       status: link.status,
+      redirectUrl: link.redirectUrl || '',
     });
   } catch (err) {
     logger.error('Get link public error:', err.message);
@@ -243,6 +246,9 @@ const initiatePayment = async (req, res) => {
       amount: String(link.amount.toFixed(2)),
       customerMobile: customerMobile || '',
       remark: link.title,
+      successUrl: `${process.env.FRONTEND_URL}/pay.html?id=${linkId}&order=${orderId}&result=success`,
+      failedUrl:  `${process.env.FRONTEND_URL}/pay.html?id=${linkId}&order=${orderId}&result=failed`,
+      timeoutUrl: `${process.env.FRONTEND_URL}/pay.html?id=${linkId}&order=${orderId}&result=timeout`,
     });
 
     return response.success(res, 'Payment initiated', {
@@ -253,6 +259,32 @@ const initiatePayment = async (req, res) => {
 
   } catch (err) {
     logger.error('Initiate link payment error:', err.message);
+    return response.serverError(res, err.message);
+  }
+};
+
+/**
+ * GET /api/payment-link/order/:orderId/status
+ * Public endpoint — used by pay.html after redirect from Zap gateway
+ * to verify the REAL payment status (webhook updates this in DB).
+ * Only returns status for orders tied to a payment link (scoped, safe).
+ */
+const getLinkOrderStatus = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const payment = await firebaseService.getPayment(orderId);
+
+    if (!payment || !payment.linkId) {
+      return response.notFound(res, 'Order not found');
+    }
+
+    return response.success(res, 'Status fetched', {
+      orderId,
+      status: payment.status, // 'pending' | 'Success' | 'failed' | 'timeout'
+      linkId: payment.linkId,
+    });
+  } catch (err) {
+    logger.error('Get link order status error:', err.message);
     return response.serverError(res, err.message);
   }
 };
@@ -302,12 +334,16 @@ const createLinkValidation = [
   body('amount').isFloat({ min: 1, max: 100000 }).withMessage('Amount must be between ₹1–₹1,00,000'),
   body('title').notEmpty().withMessage('Title is required').isLength({ max: 80 }).trim(),
   body('description').optional().isLength({ max: 300 }).trim().escape(),
+  body('redirectUrl').optional({ checkFalsy: true }).isURL({ require_protocol: true })
+    .withMessage('Redirect URL must be a valid URL starting with http:// or https://')
+    .isLength({ max: 500 }),
 ];
 
 module.exports = {
   createPaymentLink,
   getUserLinks,
   getLinkPublic,
+  getLinkOrderStatus,
   initiatePayment,
   disableLink,
   enableLink,
