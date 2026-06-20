@@ -19,7 +19,7 @@ router.put('/profile', authenticate, [
     await firebaseService.updateUserProfile(req.user.uid, req.body);
     return response.success(res, 'Profile updated successfully');
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 });
 
