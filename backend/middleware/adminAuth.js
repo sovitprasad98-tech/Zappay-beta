@@ -32,7 +32,7 @@ const requireAdmin = async (req, res, next) => {
     next();
   } catch (err) {
     logger.error('Admin auth middleware error:', err.message);
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
