@@ -267,6 +267,7 @@ module.exports = {
   getUserSubscription,
   assignFreePlan,
   activateSubscription,
+  checkAndResetMonthlyLinks,
   incrementLinkCount,
   checkWithdrawalLimit,
   incrementWithdrawalCount,

@@ -7,6 +7,23 @@ const ZAP_API_URL = process.env.ZAP_API_URL || 'https://pay.zapupi.com/api';
 const ZAP_KEY = process.env.ZAP_KEY;
 
 /**
+ * Sanitize remark for Zap UPI gateway.
+ * UPI/payment gateways reject remarks containing emoji or non-ASCII
+ * characters (e.g. plan names like "🥉 Bronze" cause "Invalid Remark").
+ * Strips everything except letters, numbers, spaces and basic punctuation,
+ * collapses whitespace, and falls back to a safe default if empty.
+ */
+function sanitizeRemark(text) {
+  if (!text) return 'ZapPay Payment';
+  const cleaned = String(text)
+    .replace(/[^\x20-\x7E]/g, '')      // strip emoji & all non-ASCII chars
+    .replace(/[^a-zA-Z0-9 .,\-_|:()]/g, '') // keep only safe punctuation
+    .replace(/\s+/g, ' ')
+    .trim();
+  return (cleaned || 'ZapPay Payment').slice(0, 50);
+}
+
+/**
  * Create a payment order with Zap UPI
  * @param {Object} params
  * @param {string} params.orderId - Unique order ID
@@ -23,6 +40,7 @@ async function createOrder({ orderId, amount, customerMobile, remark }) {
     zap_key: ZAP_KEY,
     order_id: orderId,
     amount: String(amount),
+    remark: sanitizeRemark(remark),
     success_url: `${process.env.FRONTEND_URL}/payment-success.php`,
     failed_url: `${process.env.FRONTEND_URL}/payment-failed.php`,
     timeout_url: `${process.env.FRONTEND_URL}/payment-failed.php`,
@@ -30,14 +48,13 @@ async function createOrder({ orderId, amount, customerMobile, remark }) {
 
   // Add optional fields
   if (customerMobile) payload.customer_mobile = customerMobile;
-  if (remark) payload.remark = remark;
 
   // Add webhook URL if configured
   if (process.env.WEBHOOK_URL) {
     payload.webhook_url = process.env.WEBHOOK_URL;
   }
 
-  logger.info(`Creating Zap order: ${orderId}, Amount: ₹${amount}`);
+  logger.info(`Creating Zap order: ${orderId}, Amount: ₹${amount}, Remark: ${payload.remark}`);
 
   const response = await axios.post(`${ZAP_API_URL}/create-order`, payload, {
     timeout: 15000,
