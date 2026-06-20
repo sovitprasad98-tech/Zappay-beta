@@ -100,7 +100,7 @@ const requestWithdrawal = async (req, res) => {
 
   } catch (err) {
     logger.error('Withdrawal request error:', err.message);
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -114,7 +114,7 @@ const getWithdrawalHistory = async (req, res) => {
     return response.success(res, 'Withdrawal history fetched', { withdrawals });
   } catch (err) {
     logger.error('Get withdrawal history error:', err.message);
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 

@@ -117,7 +117,7 @@ const getPaymentStatus = async (req, res) => {
     });
   } catch (err) {
     logger.error('Get payment status error:', err.message);
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -135,7 +135,7 @@ const getPaymentHistory = async (req, res) => {
     return response.success(res, 'Payment history fetched', { payments, total: payments.length });
   } catch (err) {
     logger.error('Get payment history error:', err.message);
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 

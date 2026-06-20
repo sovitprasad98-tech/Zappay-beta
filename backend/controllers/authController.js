@@ -98,7 +98,7 @@ const getMe = async (req, res) => {
       lastLoginAt: user.lastLoginAt,
     });
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 

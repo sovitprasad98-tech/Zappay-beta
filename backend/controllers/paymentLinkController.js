@@ -110,7 +110,7 @@ const createPaymentLink = async (req, res) => {
 
   } catch (err) {
     logger.error('Create payment link error:', err.message);
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -141,7 +141,7 @@ const getUserLinks = async (req, res) => {
     return response.success(res, 'Links fetched', { links, total: links.length });
   } catch (err) {
     logger.error('Get user links error:', err.message);
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -182,7 +182,7 @@ const getLinkPublic = async (req, res) => {
     });
   } catch (err) {
     logger.error('Get link public error:', err.message);
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -253,7 +253,7 @@ const initiatePayment = async (req, res) => {
 
   } catch (err) {
     logger.error('Initiate link payment error:', err.message);
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -272,7 +272,7 @@ const disableLink = async (req, res) => {
     await ref(`${DB_PATHS.PAYMENT_LINKS}/${linkId}`).update({ status: 'disabled' });
     return response.success(res, 'Payment link disabled');
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -294,7 +294,7 @@ const enableLink = async (req, res) => {
     await ref(`${DB_PATHS.PAYMENT_LINKS}/${linkId}`).update({ status: 'active' });
     return response.success(res, 'Payment link enabled');
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 

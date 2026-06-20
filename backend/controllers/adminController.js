@@ -47,7 +47,7 @@ const getDashboard = async (req, res) => {
     });
   } catch (err) {
     logger.error('Dashboard error:', err.message);
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -60,7 +60,7 @@ const getUsers = async (req, res) => {
     return response.success(res, 'Users fetched', { users, total: users.length });
   } catch (err) {
     logger.error('Get users error:', err.message);
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -79,7 +79,7 @@ const getUserDetail = async (req, res) => {
 
     return response.success(res, 'User detail fetched', { user, payments, withdrawals });
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -102,7 +102,7 @@ const toggleBan = async (req, res) => {
 
     return response.success(res, `User ${action} successfully`, { isBanned: newBanStatus });
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -140,7 +140,7 @@ const adjustWallet = async (req, res) => {
     if (err.message === 'INSUFFICIENT_BALANCE') {
       return response.error(res, 'User has insufficient balance for debit');
     }
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -153,7 +153,7 @@ const getAllPayments = async (req, res) => {
     const payments = await firebaseService.getAllPayments(limit);
     return response.success(res, 'Payments fetched', { payments, total: payments.length });
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -165,7 +165,7 @@ const getAllWithdrawals = async (req, res) => {
     const withdrawals = await firebaseService.getAllWithdrawals();
     return response.success(res, 'Withdrawals fetched', { withdrawals });
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -192,7 +192,7 @@ const approveWithdrawal = async (req, res) => {
 
     return response.success(res, 'Withdrawal approved successfully');
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -224,7 +224,7 @@ const rejectWithdrawal = async (req, res) => {
 
     return response.success(res, 'Withdrawal rejected and amount refunded');
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -236,7 +236,7 @@ const getSettings = async (req, res) => {
     const settings = await firebaseService.getSettings();
     return response.success(res, 'Settings fetched', { settings });
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -256,7 +256,7 @@ const updateSettings = async (req, res) => {
 
     return response.success(res, 'Settings updated');
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -273,7 +273,7 @@ const sendBroadcast = async (req, res) => {
 
     return response.success(res, `Notification sent to ${count} users`);
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 

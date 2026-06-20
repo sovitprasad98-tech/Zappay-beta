@@ -134,7 +134,7 @@ const adminCreatePlan = async (req, res) => {
     await ref(`${DB_PATHS.PLANS}/${id}`).set(plan);
     return response.success(res, 'Plan created', { plan }, 201);
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -154,7 +154,7 @@ const adminUpdatePlan = async (req, res) => {
     await ref(`${DB_PATHS.PLANS}/${id}`).update(update);
     return response.success(res, 'Plan updated');
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -167,7 +167,7 @@ const adminDeletePlan = async (req, res) => {
     await ref(`${DB_PATHS.PLANS}/${id}`).remove();
     return response.success(res, 'Plan deleted');
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -192,7 +192,7 @@ const adminAssignPlan = async (req, res) => {
 
     return response.success(res, `${plan.name} plan assigned`, { subscription: sub });
   } catch (err) {
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 

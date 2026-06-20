@@ -16,7 +16,7 @@ const getNotifications = async (req, res) => {
     return response.success(res, 'Notifications fetched', { notifications, unreadCount });
   } catch (err) {
     logger.error('Get notifications error:', err.message);
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -30,7 +30,7 @@ const markAsRead = async (req, res) => {
     return response.success(res, 'Notification marked as read');
   } catch (err) {
     logger.error('Mark read error:', err.message);
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
@@ -44,7 +44,7 @@ const markAllAsRead = async (req, res) => {
     return response.success(res, 'All notifications marked as read');
   } catch (err) {
     logger.error('Mark all read error:', err.message);
-    return response.serverError(res);
+    return response.serverError(res, err.message);
   }
 };
 
