@@ -31,7 +31,7 @@ function sanitizeRemark(text) {
  * @param {string} [params.customerMobile] - Optional customer mobile
  * @param {string} [params.remark] - Optional remark
  */
-async function createOrder({ orderId, amount, customerMobile, remark }) {
+async function createOrder({ orderId, amount, customerMobile, remark, successUrl, failedUrl, timeoutUrl }) {
   if (!ZAP_KEY) {
     throw new Error('ZAP_KEY not configured');
   }
@@ -41,9 +41,9 @@ async function createOrder({ orderId, amount, customerMobile, remark }) {
     order_id: orderId,
     amount: String(amount),
     remark: sanitizeRemark(remark),
-    success_url: `${process.env.FRONTEND_URL}/payment-success.php`,
-    failed_url: `${process.env.FRONTEND_URL}/payment-failed.php`,
-    timeout_url: `${process.env.FRONTEND_URL}/payment-failed.php`,
+    success_url: successUrl || `${process.env.FRONTEND_URL}/index.html?payment=success&order=${orderId}`,
+    failed_url:  failedUrl  || `${process.env.FRONTEND_URL}/index.html?payment=failed&order=${orderId}`,
+    timeout_url: timeoutUrl || `${process.env.FRONTEND_URL}/index.html?payment=failed&order=${orderId}`,
   };
 
   // Add optional fields
