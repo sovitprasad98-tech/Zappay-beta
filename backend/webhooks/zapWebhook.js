@@ -123,9 +123,6 @@ async function handleWalletTopup(payment, amount, orderId) {
 async function handleLinkPayment(payment, grossAmount, orderId, utr) {
   const sub  = await subscriptionService.getUserSubscription(payment.userId);
   const plan = sub.plan;
-  const commPct    = payment.commissionPercent ?? plan.commissionPercent;
-  const commission = Math.round(grossAmount * commPct * 100) / 10000;
-  const netAmount  = Math.round((grossAmount - commission) * 100) / 100;
 
   const balance   = await walletService.getBalance(payment.userId);
   const available = plan.walletLimit - balance;
@@ -139,18 +136,10 @@ async function handleLinkPayment(payment, grossAmount, orderId, utr) {
     return;
   }
 
-  const credit = Math.min(netAmount, available);
+  // Credit the FULL amount received — no commission is deducted here.
+  // Commission is only applied later, at withdrawal time.
+  const credit = Math.min(grossAmount, available);
   await walletService.creditWallet(payment.userId, credit, `Link ${payment.linkId}`);
-
-  if (commission > 0) {
-    const logRef = ref(DB_PATHS.COMMISSION_LOGS).push();
-    await logRef.set({
-      id: logRef.key, userId: payment.userId, linkId: payment.linkId,
-      orderId, grossAmount, commission, netAmount: credit,
-      commissionPercent: commPct, planId: plan.id, planName: plan.name,
-      createdAt: Date.now(),
-    });
-  }
 
   await ref(`${DB_PATHS.PAYMENT_LINKS}/${payment.linkId}`).transaction(l => {
     if (!l) return l;
@@ -159,12 +148,12 @@ async function handleLinkPayment(payment, grossAmount, orderId, utr) {
 
   await notificationService.createNotification(payment.userId, {
     title: '💰 Payment Received via Link',
-    message: `₹${credit} credited (₹${grossAmount} - ₹${commission} commission). Order: ${orderId}`,
+    message: `₹${credit} credited to your wallet. Order: ${orderId}`,
     type: 'payment',
   });
 
   await firebaseService.logActivity(payment.userId, 'PAYMENT_SUCCESS', {
-    orderId, grossAmount, commission, netAmount: credit, linkId: payment.linkId, utr,
+    orderId, grossAmount, netAmount: credit, linkId: payment.linkId, utr,
   });
 
   logger.info(`Link payment: ${payment.userId} +₹${credit}`);
