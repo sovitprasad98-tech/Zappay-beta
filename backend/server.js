@@ -58,6 +58,8 @@ app.use('/api/payment-link', require('./routes/paymentLink'));
 app.use('/api/subscription', require('./routes/subscription'));
 app.use('/api/withdrawal',   require('./routes/withdrawal'));
 app.use('/api/notification', require('./routes/notification'));
+app.use('/api/referral',     require('./routes/referral'));
+app.use('/api/promo',        require('./routes/promo'));
 app.use('/api/admin',        require('./routes/admin'));
 app.use('/api/webhook',      require('./routes/webhook'));
 
@@ -78,6 +80,8 @@ if (process.env.NODE_ENV !== 'production') {
     try {
       const { seedDefaultPlans } = require('./services/subscriptionService');
       await seedDefaultPlans();
+      const { seedDefaultPromoCodes } = require('./services/promoService');
+      await seedDefaultPromoCodes();
     } catch (e) {
       logger.error('Plan seed error: ' + e.message);
     }
@@ -91,6 +95,8 @@ if (process.env.NODE_ENV !== 'production') {
       try {
         const { seedDefaultPlans } = require('./services/subscriptionService');
         await seedDefaultPlans();
+        const { seedDefaultPromoCodes } = require('./services/promoService');
+        await seedDefaultPromoCodes();
       } catch (e) {
         logger.error('Plan seed error: ' + e.message);
       }
