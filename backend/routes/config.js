@@ -8,8 +8,9 @@
 const express = require('express');
 const router = express.Router();
 const response = require('../helpers/response');
+const firebaseService = require('../services/firebaseService');
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const required = [
     'FIREBASE_API_KEY',
     'FIREBASE_AUTH_DOMAIN',
@@ -25,6 +26,12 @@ router.get('/', (req, res) => {
     );
   }
 
+  let socialLinks = {};
+  try {
+    const settings = await firebaseService.getSettings();
+    socialLinks = settings.socialLinks || {};
+  } catch (e) { /* settings unreachable — return empty social links rather than failing config entirely */ }
+
   return response.success(res, 'Config fetched', {
     firebaseConfig: {
       apiKey: process.env.FIREBASE_API_KEY,
@@ -36,6 +43,7 @@ router.get('/', (req, res) => {
       appId: process.env.FIREBASE_APP_ID,
     },
     siteName: process.env.SITE_NAME || 'ZapPay',
+    socialLinks,
   });
 });
 
