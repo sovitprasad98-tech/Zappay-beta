@@ -3,6 +3,7 @@ const firebaseService     = require('../services/firebaseService');
 const walletService       = require('../services/walletService');
 const notificationService = require('../services/notificationService');
 const subscriptionService = require('../services/subscriptionService');
+const referralService     = require('../services/referralService');
 const zapService          = require('../services/zapService');
 const { ref }             = require('../firebase/admin');
 const { DB_PATHS, DEFAULT_PLANS } = require('../config/constants');
@@ -58,6 +59,12 @@ async function processWebhookAsync(data) {
     // ── WALLET TOP-UP (direct) ──
     if (!payment.linkId) {
       await handleWalletTopup(payment, grossAmount, order_id);
+      // Referral reward only triggers for an EXPLICIT self-funded top-up —
+      // never for 'quick_link' orders, since those may be paid by a
+      // customer rather than the merchant themselves.
+      if (payment.type === 'wallet_topup') {
+        await referralService.processQualifyingDeposit(payment.userId, grossAmount);
+      }
       return;
     }
 
