@@ -51,6 +51,10 @@ module.exports = {
     USER_SUBSCRIPTIONS: 'userSubscriptions',
     PAYMENT_LINKS: 'paymentLinks',
     COMMISSION_LOGS: 'commissionLogs',
+    REFERRALS: 'referrals',
+    REFERRAL_CODES: 'referralCodes',
+    PROMO_CODES: 'promoCodes',
+    PROMO_REDEMPTIONS: 'promoRedemptions',
   },
 
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '30d',
@@ -63,6 +67,32 @@ module.exports = {
     maintenanceMode: false,
     siteName: 'ZapPay',
     supportEmail: 'support@zappay.in',
+    // Referral program
+    signupBonus: 100,                  // ₹ credited to a NEW user who signs up via a referral link
+    referralCommissionPercent: 30,      // % of the referred user's qualifying deposit paid to the referrer
+    referralQualifyingMinDeposit: 100,  // minimum wallet top-up (₹) that counts as a "qualifying" deposit
+    // Social / contact links — edit url + enabled per channel (enabled controls visibility on Contact Us page)
+    socialLinks: {
+      telegram:  { url: '', enabled: false },
+      instagram: { url: '', enabled: false },
+      youtube:   { url: '', enabled: false },
+      whatsapp:  { url: '', enabled: false },
+    },
+  },
+
+  // Default promo codes — seeded once, never overwritten by backend (admin can edit later)
+  DEFAULT_PROMO_CODES: {
+    WELCM5: {
+      code: 'WELCM5',
+      type: 'fixed',       // 'fixed' = flat ₹ credit, 'percent' = % of next deposit (reserved for future use)
+      value: 5,
+      maxUses: -1,          // -1 = unlimited
+      usedCount: 0,
+      perUserLimit: 1,
+      isActive: true,
+      description: 'Welcome bonus — ₹5 wallet credit',
+      createdAt: Date.now(),
+    },
   },
 
   // Default plans — seeded once, never overwritten by backend
