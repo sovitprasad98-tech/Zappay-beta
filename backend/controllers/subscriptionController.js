@@ -1,6 +1,7 @@
 // controllers/subscriptionController.js
 const subscriptionService = require('../services/subscriptionService');
 const firebaseService     = require('../services/firebaseService');
+const walletService       = require('../services/walletService');
 const notificationService = require('../services/notificationService');
 const zapService          = require('../services/zapService');
 const { ref }             = require('../firebase/admin');
@@ -87,6 +88,73 @@ const purchasePlan = async (req, res) => {
     });
   } catch (err) {
     logger.error('Purchase plan error:', err.message);
+    return response.serverError(res, err.message);
+  }
+};
+
+/**
+ * POST /api/subscription/purchase-wallet
+ * Pay for a plan upgrade directly from wallet balance — instant activation,
+ * no UPI gateway involved.
+ */
+const purchasePlanWithWallet = async (req, res) => {
+  try {
+    const { planId } = req.body;
+    if (!planId) return response.error(res, 'planId required');
+
+    const plan = await subscriptionService.getPlan(planId) || DEFAULT_PLANS[planId];
+    if (!plan) return response.notFound(res, 'Plan not found');
+    if (plan.price === 0) return response.error(res, 'Blaze plan is free — no payment needed');
+
+    const userId  = req.user.uid;
+    const balance = await walletService.getBalance(userId);
+
+    if (balance < plan.price) {
+      return response.error(res, `Insufficient wallet balance. You need ₹${plan.price}, available: ₹${balance.toFixed(2)}`);
+    }
+
+    // Debit wallet (transaction-safe, re-checks balance internally)
+    try {
+      await walletService.debitWallet(userId, plan.price, `Subscription: ${plan.name}`);
+    } catch (debitErr) {
+      if (debitErr.message === 'INSUFFICIENT_BALANCE') {
+        return response.error(res, 'Insufficient wallet balance.');
+      }
+      throw debitErr;
+    }
+
+    // Activate immediately — no webhook needed for wallet payments
+    const sub = await subscriptionService.activateSubscription(userId, planId, 30);
+
+    const orderId = zapService.generateOrderId(userId);
+    await firebaseService.createPayment(orderId, {
+      userId,
+      amount: plan.price,
+      remark: `ZapPay Subscription (Wallet): ${plan.name}`,
+      type: 'subscription',
+      planId: plan.id,
+    });
+    await firebaseService.updatePaymentStatus(orderId, { status: 'Success', txn_id: 'WALLET', utr: '', amount: plan.price, pay_amount: plan.price });
+
+    await notificationService.createNotification(userId, {
+      title: `🎉 ${plan.name} Plan Activated!`,
+      message: `₹${plan.price} deducted from wallet. Your ${plan.name} subscription is now active for 30 days.`,
+      type: 'subscription',
+    });
+
+    await firebaseService.logActivity(userId, 'SUBSCRIPTION_ACTIVATED_WALLET', {
+      planId: plan.id, planName: plan.name, amount: plan.price, orderId,
+    });
+
+    logger.info(`Subscription via wallet: ${userId} → ${planId}`);
+
+    return response.success(res, `${plan.name} plan activated!`, {
+      subscription: sub,
+      plan,
+      orderId,
+    });
+  } catch (err) {
+    logger.error('Purchase plan with wallet error:', err.message);
     return response.serverError(res, err.message);
   }
 };
@@ -231,7 +299,7 @@ const planValidation = [
 ];
 
 module.exports = {
-  getPlans, getMySubscription, purchasePlan,
+  getPlans, getMySubscription, purchasePlan, purchasePlanWithWallet,
   adminGetPlans, adminCreatePlan, adminUpdatePlan, adminDeletePlan,
   adminAssignPlan, adminGetPaymentLinks, adminGetCommissionLogs,
   planValidation,

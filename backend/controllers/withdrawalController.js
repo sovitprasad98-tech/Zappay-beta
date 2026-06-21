@@ -20,7 +20,8 @@ const requestWithdrawal = async (req, res) => {
 
     const { amount, upiId, accountName } = req.body;
     const userId = req.user.uid;
-    const withdrawAmount = parseFloat(amount);
+    // 'amount' is the NET amount the user wants to actually receive in hand.
+    const netAmount = parseFloat(amount);
 
     // Get platform settings
     const settings = await firebaseService.getSettings();
@@ -33,20 +34,24 @@ const requestWithdrawal = async (req, res) => {
       return response.error(res, 'Withdrawal system under maintenance.', 503);
     }
 
-    // Check minimum withdrawal
-    if (withdrawAmount < minWithdrawal) {
+    // Check minimum withdrawal (this is the NET amount the user receives)
+    if (netAmount < minWithdrawal) {
       return response.error(res, `Minimum withdrawal amount is ₹${minWithdrawal}`);
     }
 
-    // Check wallet balance
-    const balance = await walletService.getBalance(userId);
-    if (balance < withdrawAmount) {
-      return response.error(res, `Insufficient wallet balance. Available: ₹${balance.toFixed(2)}`);
-    }
+    // Commission is added ON TOP of what the user wants — e.g. ₹100 net at
+    // 5% commission requires ₹105 held from the wallet (100 + 5).
+    const commission     = Math.round((netAmount * commissionPercent) / 100 * 100) / 100;
+    const requiredAmount = Math.round((netAmount + commission) * 100) / 100;
 
-    // Calculate commission
-    const commission = Math.round((withdrawAmount * commissionPercent) / 100 * 100) / 100;
-    const netAmount = Math.round((withdrawAmount - commission) * 100) / 100;
+    // Check wallet balance against the REQUIRED (gross) amount, not net
+    const balance = await walletService.getBalance(userId);
+    if (balance < requiredAmount) {
+      return response.error(
+        res,
+        `Insufficient balance. To withdraw ₹${netAmount}, you need ₹${requiredAmount} in your wallet (₹${netAmount} + ${commissionPercent}% commission = ₹${commission}). Available: ₹${balance.toFixed(2)}`
+      );
+    }
 
     // Check for pending withdrawal (1 pending at a time)
     const existingWithdrawals = await firebaseService.getUserWithdrawals(userId);
@@ -55,9 +60,9 @@ const requestWithdrawal = async (req, res) => {
       return response.error(res, 'You already have a pending withdrawal request. Please wait for it to be processed.');
     }
 
-    // Debit wallet FIRST (holds the amount)
+    // Hold the REQUIRED (gross) amount from the wallet
     try {
-      await walletService.debitWallet(userId, withdrawAmount, `Withdrawal request`);
+      await walletService.debitWallet(userId, requiredAmount, `Withdrawal request`);
     } catch (debitErr) {
       if (debitErr.message === 'INSUFFICIENT_BALANCE') {
         return response.error(res, 'Insufficient balance');
@@ -65,9 +70,9 @@ const requestWithdrawal = async (req, res) => {
       throw debitErr;
     }
 
-    // Create withdrawal record
+    // Create withdrawal record — 'amount' = held/gross, 'netAmount' = what user receives
     const withdrawalId = await firebaseService.createWithdrawal(userId, {
-      amount: withdrawAmount,
+      amount: requiredAmount,
       commission,
       netAmount,
       upiId: upiId.trim(),
@@ -77,22 +82,22 @@ const requestWithdrawal = async (req, res) => {
     // Notify user
     await notificationService.createNotification(userId, {
       title: '📤 Withdrawal Request Submitted',
-      message: `Your withdrawal request of ₹${withdrawAmount} (Net: ₹${netAmount} after ${commissionPercent}% commission) has been submitted and is under review.`,
+      message: `Your withdrawal request for ₹${netAmount} (₹${requiredAmount} held incl. ${commissionPercent}% commission) has been submitted and is under review.`,
       type: 'withdrawal',
     });
 
     await firebaseService.logActivity(userId, 'WITHDRAWAL_REQUEST', {
       withdrawalId,
-      amount: withdrawAmount,
+      amount: requiredAmount,
       netAmount,
       upiId,
     });
 
-    logger.info(`Withdrawal requested: ${withdrawalId} by ${userId} for ₹${withdrawAmount}`);
+    logger.info(`Withdrawal requested: ${withdrawalId} by ${userId} for ₹${netAmount} (held ₹${requiredAmount})`);
 
     return response.success(res, 'Withdrawal request submitted successfully', {
       withdrawalId,
-      amount: withdrawAmount,
+      amount: requiredAmount,
       commission,
       netAmount,
       status: 'pending',

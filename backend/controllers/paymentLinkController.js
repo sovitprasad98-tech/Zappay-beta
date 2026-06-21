@@ -211,9 +211,8 @@ const initiatePayment = async (req, res) => {
     const merchantSub = await subscriptionService.getUserSubscription(link.userId);
     const plan = merchantSub.plan;
     const balance = await walletService.getBalance(link.userId);
-    const netAmount = link.amount * (1 - (link.commissionPercent || plan.commissionPercent) / 100);
-
-    if (balance + netAmount > plan.walletLimit) {
+    // Full amount is credited now (commission only applies at withdrawal time)
+    if (balance + link.amount > plan.walletLimit) {
       return response.error(res, 'Merchant wallet is full. Please contact the merchant.');
     }
 
