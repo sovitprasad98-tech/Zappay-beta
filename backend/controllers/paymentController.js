@@ -34,7 +34,7 @@ const createOrder = async (req, res) => {
       return response.error(res, 'Validation failed', 400, errors.array());
     }
 
-    const { amount, remark, customerMobile } = req.body;
+    const { amount, remark, customerMobile, type } = req.body;
     const userId = req.user.uid;
 
     // Check maintenance mode
@@ -63,6 +63,7 @@ const createOrder = async (req, res) => {
       amount: parseFloat(amount),
       remark: fullRemark,
       customerMobile: customerMobile || user.phone || '',
+      type: type === 'wallet_topup' ? 'wallet_topup' : 'quick_link',
     });
 
     // Call Zap UPI API (backend only - ZAP_KEY never exposed to frontend)

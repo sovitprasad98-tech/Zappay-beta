@@ -15,7 +15,7 @@ const logger = require('../utils/logger');
  */
 const googleAuth = async (req, res) => {
   try {
-    const { idToken } = req.body;
+    const { idToken, referralCode } = req.body;
     if (!idToken) return response.error(res, 'Firebase ID token is required');
 
     // Verify Firebase ID token (works for any Firebase auth provider)
@@ -47,6 +47,7 @@ const googleAuth = async (req, res) => {
       displayName: name || email?.split('@')[0] || 'User',
       photoURL: picture || '',
       authProvider: firebase?.sign_in_provider || 'unknown',
+      referralCode,
     });
 
     // Generate JWT
