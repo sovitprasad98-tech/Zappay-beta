@@ -18,26 +18,86 @@ async function getUser(uid) {
 }
 
 /**
+ * Generate a unique, human-shareable referral code (e.g. ZAP6UTQV85ZO)
+ */
+function generateReferralCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous 0/O/1/I
+  let suffix = '';
+  for (let i = 0; i < 8; i++) suffix += chars[Math.floor(Math.random() * chars.length)];
+  return `ZAP${suffix}`;
+}
+
+/**
+ * Resolve a referral code to the referrer's UID (returns null if not found)
+ */
+async function getUidByReferralCode(code) {
+  if (!code) return null;
+  const snap = await ref(`${DB_PATHS.REFERRAL_CODES}/${code.trim().toUpperCase()}`).once('value');
+  return snap.exists() ? snap.val() : null;
+}
+
+/**
  * Create or update user on login
+ * @param {string} uid
+ * @param {object} data
+ * @param {string} [data.referralCode] - code of the user who referred this signup (NEW users only)
  */
 async function upsertUser(uid, data) {
   const userRef = ref(`${DB_PATHS.USERS}/${uid}`);
   const snap = await userRef.once('value');
 
   if (!snap.exists()) {
-    // New user
+    // New user — generate their own shareable referral code
+    const myReferralCode = generateReferralCode();
+    const settings = await getSettings();
+    const signupBonus = settings.signupBonus || 0;
+
+    // Resolve referrer (if a valid referral code was supplied at signup)
+    let referredBy = null;
+    let bonusGranted = 0;
+    if (data.referralCode) {
+      const referrerUid = await getUidByReferralCode(data.referralCode);
+      if (referrerUid && referrerUid !== uid) {
+        referredBy = referrerUid;
+        bonusGranted = signupBonus;
+      }
+    }
+
     await userRef.set({
       uid,
       email: data.email,
       displayName: data.displayName || '',
       photoURL: data.photoURL || '',
       role: 'user',
-      wallet: { balance: 0, lastUpdated: serverTimestamp() },
+      wallet: { balance: bonusGranted, lastUpdated: serverTimestamp() },
       isActive: true,
       isBanned: false,
+      referralCode: myReferralCode,
+      referredBy,
       createdAt: serverTimestamp(),
       lastLoginAt: serverTimestamp(),
     });
+
+    // Register the code → uid index for fast lookup when others use it
+    await ref(`${DB_PATHS.REFERRAL_CODES}/${myReferralCode}`).set(uid);
+
+    // If referred, create the tracking record under the referrer's list
+    if (referredBy) {
+      await ref(`${DB_PATHS.REFERRALS}/${referredBy}/${uid}`).set({
+        referredUid: uid,
+        referrerUid: referredBy,
+        name: data.displayName || 'User',
+        email: data.email || '',
+        status: 'waiting',          // waiting → completed (once qualifying deposit happens)
+        signupBonusGiven: bonusGranted > 0,
+        signupBonus: bonusGranted,
+        purchaseAmount: null,
+        commissionPercent: settings.referralCommissionPercent || 30,
+        commission: null,
+        createdAt: serverTimestamp(),
+        completedAt: null,
+      });
+    }
   } else {
     // Existing user - update last login
     await userRef.update({
@@ -315,6 +375,8 @@ module.exports = {
   updateUserProfile,
   getAllUsers,
   setBanStatus,
+  generateReferralCode,
+  getUidByReferralCode,
   // Payments
   createPayment,
   updatePaymentStatus,

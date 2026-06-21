@@ -77,6 +77,12 @@ async function createOrder({ orderId, amount, customerMobile, remark, successUrl
 /**
  * Check order payment status
  * @param {string} orderId - Order ID to check
+ * Per official ZapUPI docs, the response is FLAT and 'status' here is the
+ * actual payment status: "Pending" | "Success" | "Failed" — NOT a lowercase
+ * API-call-wrapper status like create-order's 'status' field. Treating it
+ * like the create-order response was a bug — it made this function throw
+ * on every call except a real (rare) literal 'success' string, silently
+ * breaking the webhook's server-side double-verification.
  */
 async function getOrderStatus(orderId) {
   if (!ZAP_KEY) {
@@ -89,13 +95,8 @@ async function getOrderStatus(orderId) {
     { timeout: 15000, headers: { 'Content-Type': 'application/json' } }
   );
 
-  const data = response.data;
-
-  if (data.status !== 'success') {
-    throw new Error(data.message || 'Failed to fetch order status');
-  }
-
-  return data.data || data;
+  // { status: 'Pending'|'Success'|'Failed', amount, pay_amount, txn_id, utr, environment }
+  return response.data;
 }
 
 /**
