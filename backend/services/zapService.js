@@ -31,7 +31,7 @@ function sanitizeRemark(text) {
  * @param {string} [params.customerMobile] - Optional customer mobile
  * @param {string} [params.remark] - Optional remark
  */
-async function createOrder({ orderId, amount, customerMobile, remark, successUrl, failedUrl, timeoutUrl }) {
+async function createOrder({ orderId, amount, customerMobile, remark, successUrl, failedUrl, timeoutUrl, omitRedirectUrls }) {
   if (!ZAP_KEY) {
     throw new Error('ZAP_KEY not configured');
   }
@@ -41,10 +41,17 @@ async function createOrder({ orderId, amount, customerMobile, remark, successUrl
     order_id: orderId,
     amount: String(amount),
     remark: sanitizeRemark(remark),
-    success_url: successUrl || `${process.env.FRONTEND_URL}/index.html?payment=success&order=${orderId}`,
-    failed_url:  failedUrl  || `${process.env.FRONTEND_URL}/index.html?payment=failed&order=${orderId}`,
-    timeout_url: timeoutUrl || `${process.env.FRONTEND_URL}/index.html?payment=failed&order=${orderId}`,
   };
+
+  // When the order will be opened via ZapUPI's single-html-web-kit.js
+  // (embedded overlay + onSuccess/onFailed/onTimeout JS callbacks), the
+  // SDK manages redirect detection internally — adding our own
+  // success_url/failed_url/timeout_url here would conflict with that.
+  if (!omitRedirectUrls) {
+    payload.success_url = successUrl || `${process.env.FRONTEND_URL}/index.html?payment=success&order=${orderId}`;
+    payload.failed_url  = failedUrl  || `${process.env.FRONTEND_URL}/index.html?payment=failed&order=${orderId}`;
+    payload.timeout_url = timeoutUrl || `${process.env.FRONTEND_URL}/index.html?payment=failed&order=${orderId}`;
+  }
 
   // Add optional fields
   if (customerMobile) payload.customer_mobile = customerMobile;
