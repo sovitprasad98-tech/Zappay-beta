@@ -196,7 +196,7 @@ const getLinkPublic = async (req, res) => {
 const initiatePayment = async (req, res) => {
   try {
     const { linkId } = req.params;
-    const { customerMobile, customerName } = req.body;
+    const { customerMobile, customerName, useEmbedded } = req.body;
 
     const snap = await ref(`${DB_PATHS.PAYMENT_LINKS}/${linkId}`).once('value');
     if (!snap.exists()) return response.notFound(res, 'Payment link not found');
@@ -245,9 +245,12 @@ const initiatePayment = async (req, res) => {
       amount: String(link.amount.toFixed(2)),
       customerMobile: customerMobile || '',
       remark: link.title,
-      successUrl: `${process.env.FRONTEND_URL}/pay.html?id=${linkId}&order=${orderId}&result=success`,
-      failedUrl:  `${process.env.FRONTEND_URL}/pay.html?id=${linkId}&order=${orderId}&result=failed`,
-      timeoutUrl: `${process.env.FRONTEND_URL}/pay.html?id=${linkId}&order=${orderId}&result=timeout`,
+      omitRedirectUrls: !!useEmbedded,
+      ...(useEmbedded ? {} : {
+        successUrl: `${process.env.FRONTEND_URL}/pay.html?id=${linkId}&order=${orderId}&result=success`,
+        failedUrl:  `${process.env.FRONTEND_URL}/pay.html?id=${linkId}&order=${orderId}&result=failed`,
+        timeoutUrl: `${process.env.FRONTEND_URL}/pay.html?id=${linkId}&order=${orderId}&result=timeout`,
+      }),
     });
 
     return response.success(res, 'Payment initiated', {
