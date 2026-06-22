@@ -68,14 +68,14 @@ module.exports = {
     siteName: 'ZapPay',
     supportEmail: 'support@zappay.in',
     // Referral program
-    signupBonus: 100,                  // ₹ credited to a NEW user who signs up via a referral link
+    signupBonus: 5,                     // ₹ credited to a NEW user who signs up via a referral link
     referralCommissionPercent: 30,      // % of the referred user's qualifying deposit paid to the referrer
     referralQualifyingMinDeposit: 100,  // minimum wallet top-up (₹) that counts as a "qualifying" deposit
     // Social / contact links — edit url + enabled per channel (enabled controls visibility on Contact Us page)
     socialLinks: {
-      telegram:  { url: '', enabled: false },
-      instagram: { url: '', enabled: false },
-      youtube:   { url: '', enabled: false },
+      telegram:  { url: 'https://t.me/SovitX_developer', enabled: true },
+      instagram: { url: 'https://www.instagram.com/only_sovitx?igsh=djZudm5rcTYwOGM4', enabled: true },
+      youtube:   { url: 'https://youtube.com/@ai_science_sovitx?si=vq06Nie8s66d4SOZ', enabled: true },
       whatsapp:  { url: '', enabled: false },
     },
   },
