@@ -99,12 +99,20 @@ async function upsertUser(uid, data) {
       });
     }
   } else {
-    // Existing user - update last login
-    await userRef.update({
-      displayName: data.displayName || snap.val().displayName,
-      photoURL: data.photoURL || snap.val().photoURL,
+    // Existing user - update last login, and backfill a referral code
+    // if they don't have one yet (e.g. account predates this feature)
+    const existing = snap.val();
+    const updates = {
+      displayName: data.displayName || existing.displayName,
+      photoURL: data.photoURL || existing.photoURL,
       lastLoginAt: serverTimestamp(),
-    });
+    };
+    if (!existing.referralCode) {
+      const myReferralCode = generateReferralCode();
+      updates.referralCode = myReferralCode;
+      await ref(`${DB_PATHS.REFERRAL_CODES}/${myReferralCode}`).set(uid);
+    }
+    await userRef.update(updates);
   }
 
   const updated = await userRef.once('value');
