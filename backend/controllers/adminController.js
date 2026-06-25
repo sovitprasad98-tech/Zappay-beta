@@ -245,7 +245,10 @@ const getSettings = async (req, res) => {
  */
 const updateSettings = async (req, res) => {
   try {
-    const allowed = ['minWithdrawal', 'commissionPercent', 'maintenanceMode', 'siteName', 'supportEmail'];
+    const allowed = [
+      'minWithdrawal', 'commissionPercent', 'maintenanceMode', 'siteName', 'supportEmail',
+      'signupBonus', 'referralCommissionPercent', 'referralQualifyingMinDeposit', 'socialLinks',
+    ];
     const update = {};
     allowed.forEach((key) => {
       if (req.body[key] !== undefined) update[key] = req.body[key];
@@ -277,6 +280,34 @@ const sendBroadcast = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/admin/referrals
+ * All referral relationships across the platform, for oversight
+ */
+const getAllReferrals = async (req, res) => {
+  try {
+    const { ref } = require('../firebase/admin');
+    const { DB_PATHS } = require('../config/constants');
+    const snap = await ref(DB_PATHS.REFERRALS).once('value');
+    const referrals = [];
+    if (snap.exists()) {
+      snap.forEach((referrerSnap) => {
+        referrerSnap.forEach((r) => referrals.push(r.val()));
+      });
+    }
+    referrals.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    const totalCommissionPaid = referrals.reduce((s, r) => s + (r.commission || 0), 0);
+    return response.success(res, 'Referrals fetched', {
+      referrals,
+      total: referrals.length,
+      completed: referrals.filter((r) => r.status === 'completed').length,
+      totalCommissionPaid,
+    });
+  } catch (err) {
+    return response.serverError(res, err.message);
+  }
+};
+
 const adjustWalletValidation = [
   body('userId').notEmpty().withMessage('User ID required'),
   body('amount').isFloat({ min: -100000, max: 100000 }).withMessage('Invalid amount'),
@@ -297,4 +328,5 @@ module.exports = {
   getSettings,
   updateSettings,
   sendBroadcast,
+  getAllReferrals,
 };

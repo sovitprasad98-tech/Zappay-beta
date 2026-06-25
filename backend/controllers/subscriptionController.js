@@ -277,11 +277,28 @@ const adminGetPaymentLinks = async (req, res) => {
 
 const adminGetCommissionLogs = async (req, res) => {
   try {
-    const snap = await ref(DB_PATHS.COMMISSION_LOGS).orderByChild('createdAt').limitToLast(200).once('value');
-    const logs = [];
-    if (snap.exists()) snap.forEach(c => logs.push(c.val()));
-    const total = logs.reduce((s, l) => s + (l.commission || 0), 0);
-    return response.success(res, 'Commission logs fetched', { logs: logs.reverse(), totalCommission: total });
+    // Commission is now earned at withdrawal time (not at payment-receipt
+    // time), so withdrawals — not the old commissionLogs table — are the
+    // source of truth for commission reporting.
+    const withdrawals = await firebaseService.getAllWithdrawals();
+    const logs = withdrawals
+      .filter((w) => w.commission > 0)
+      .map((w) => ({
+        userId: w.userId,
+        withdrawalId: w.id,
+        commission: w.commission,
+        netAmount: w.netAmount,
+        grossAmount: w.amount,
+        status: w.status, // commission is only realized once status === 'approved'
+        createdAt: w.createdAt,
+      }))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    const totalCommission = logs
+      .filter((l) => l.status === 'approved')
+      .reduce((s, l) => s + (l.commission || 0), 0);
+
+    return response.success(res, 'Commission logs fetched', { logs, totalCommission });
   } catch (err) {
     return response.success(res, 'Commission logs fetched', { logs: [], totalCommission: 0 });
   }
