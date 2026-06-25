@@ -20,12 +20,14 @@ router.put('/withdrawals/:id/reject', admin.rejectWithdrawal);
 router.get('/settings', admin.getSettings);
 router.put('/settings', admin.updateSettings);
 router.post('/notifications/send', admin.sendBroadcast);
+router.get('/referrals', admin.getAllReferrals);
 
 module.exports = router;
 
 // ── Subscription + Plan routes (admin only, already uses authenticate+requireAdmin) ──
 const subCtrl = require('../controllers/subscriptionController');
 const plCtrl  = require('../controllers/paymentLinkController');
+const promoCtrl = require('../controllers/promoController');
 
 router.get('/plans',                    subCtrl.adminGetPlans);
 router.post('/plans',                   subCtrl.planValidation, subCtrl.adminCreatePlan);
@@ -34,3 +36,6 @@ router.delete('/plans/:id',             subCtrl.adminDeletePlan);
 router.post('/users/:uid/subscription', subCtrl.adminAssignPlan);
 router.get('/payment-links',            subCtrl.adminGetPaymentLinks);
 router.get('/commission-logs',          subCtrl.adminGetCommissionLogs);
+router.get('/promo-codes',              promoCtrl.adminGetPromoCodes);
+router.post('/promo-codes',             promoCtrl.adminCreatePromoCode);
+router.put('/promo-codes/:code/toggle', promoCtrl.adminTogglePromoCode);
