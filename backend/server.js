@@ -17,14 +17,24 @@ const app = express();
 app.use(helmet({ crossOriginEmbedderPolicy: false, contentSecurityPolicy: false }));
 
 // CORS
+// Normalize origins (strip trailing slash, lowercase) so a Vercel env var
+// like "https://zappay.page.gd/" still matches the browser's actual
+// Origin header "https://zappay.page.gd" (browsers never send a trailing
+// slash). A mismatch here causes fetch() to fail with a generic, unhelpful
+// "Failed to fetch" — the browser hides the real CORS reason from JS.
+const normalizeOrigin = (o) => (o || '').trim().toLowerCase().replace(/\/+$/, '');
 const allowedOrigins = process.env.FRONTEND_URL
-  ? process.env.FRONTEND_URL.split(',').map(o => o.trim())
+  ? process.env.FRONTEND_URL.split(',').map(normalizeOrigin)
   : ['*'];
 
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) cb(null, true);
-    else cb(new Error('Not allowed by CORS'));
+    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(normalizeOrigin(origin))) {
+      cb(null, true);
+    } else {
+      logger.warn(`CORS rejected origin: "${origin}" — allowed: ${JSON.stringify(allowedOrigins)}`);
+      cb(new Error('Not allowed by CORS'));
+    }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
