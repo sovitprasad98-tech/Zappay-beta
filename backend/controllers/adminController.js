@@ -107,6 +107,32 @@ const toggleBan = async (req, res) => {
 };
 
 /**
+ * DELETE /api/admin/users/:uid
+ * Permanently removes a user's profile from the database.
+ */
+const deleteUser = async (req, res) => {
+  try {
+    const { uid } = req.params;
+    const user = await firebaseService.getUser(uid);
+    if (!user) return response.notFound(res, 'User not found');
+    if (user.role === 'admin') return response.error(res, 'Cannot delete an admin account.');
+
+    const balance = user.wallet?.balance || 0;
+    if (balance > 0 && req.query.force !== 'true') {
+      return response.error(res, `This user still has ₹${balance} in their wallet. Confirm again to delete anyway.`);
+    }
+
+    await firebaseService.deleteUser(uid);
+    logger.info(`User ${uid} deleted by admin ${req.user.uid}`);
+    await firebaseService.logActivity(req.user.uid, 'USER_DELETED', { targetUid: uid, walletBalanceAtDeletion: balance });
+
+    return response.success(res, 'User deleted successfully');
+  } catch (err) {
+    return response.serverError(res, err.message);
+  }
+};
+
+/**
  * POST /api/admin/wallet/adjust
  * Manual wallet credit or debit
  */
@@ -319,6 +345,7 @@ module.exports = {
   getUsers,
   getUserDetail,
   toggleBan,
+  deleteUser,
   adjustWallet,
   adjustWalletValidation,
   getAllPayments,
