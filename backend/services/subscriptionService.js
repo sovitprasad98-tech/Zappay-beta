@@ -113,7 +113,7 @@ async function assignFreePlan(userId) {
  * or after payment verification for subscription purchase)
  */
 async function activateSubscription(userId, planId, durationDays = 30) {
-  const plan = await getPlan(planId);
+  const plan = await getPlan(planId) || DEFAULT_PLANS[planId];
   if (!plan) throw new Error(`Plan ${planId} not found`);
 
   const now = Date.now();

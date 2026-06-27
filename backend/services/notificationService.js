@@ -21,17 +21,20 @@ async function createNotification(userId, { title, message, type = NOTIFICATION_
 
 /**
  * Get notifications for a user
+ * NOTE: fetches the full set and sorts/slices in JS rather than using
+ * orderByChild + limitToLast — that combination silently misbehaves on
+ * Firebase RTDB if the .indexOn rule for 'createdAt' hasn't been applied
+ * (a common deployment gap), causing newer notifications to be dropped
+ * from the result while getUnreadCount (a simpler equalTo query) still
+ * counts them correctly — exactly the "badge says 2, list shows 1" bug.
  */
 async function getUserNotifications(userId, limit = 30) {
-  const snap = await ref(`${DB_PATHS.NOTIFICATIONS}/${userId}`)
-    .orderByChild('createdAt')
-    .limitToLast(limit)
-    .once('value');
-
+  const snap = await ref(`${DB_PATHS.NOTIFICATIONS}/${userId}`).once('value');
   if (!snap.exists()) return [];
   const notifs = [];
   snap.forEach((child) => notifs.push(child.val()));
-  return notifs.sort((a, b) => b.createdAt - a.createdAt);
+  notifs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  return notifs.slice(0, limit);
 }
 
 /**
@@ -47,28 +50,24 @@ async function markAsRead(userId, notifId) {
  * Mark all notifications as read
  */
 async function markAllAsRead(userId) {
-  const snap = await ref(`${DB_PATHS.NOTIFICATIONS}/${userId}`)
-    .orderByChild('isRead')
-    .equalTo(false)
-    .once('value');
-
+  const snap = await ref(`${DB_PATHS.NOTIFICATIONS}/${userId}`).once('value');
   if (!snap.exists()) return;
   const updates = {};
   snap.forEach((child) => {
-    updates[`${child.key}/isRead`] = true;
+    if (child.val().isRead === false) updates[`${child.key}/isRead`] = true;
   });
-  await ref(`${DB_PATHS.NOTIFICATIONS}/${userId}`).update(updates);
+  if (Object.keys(updates).length) await ref(`${DB_PATHS.NOTIFICATIONS}/${userId}`).update(updates);
 }
 
 /**
  * Get unread notification count
  */
 async function getUnreadCount(userId) {
-  const snap = await ref(`${DB_PATHS.NOTIFICATIONS}/${userId}`)
-    .orderByChild('isRead')
-    .equalTo(false)
-    .once('value');
-  return snap.numChildren();
+  const snap = await ref(`${DB_PATHS.NOTIFICATIONS}/${userId}`).once('value');
+  if (!snap.exists()) return 0;
+  let count = 0;
+  snap.forEach((child) => { if (child.val().isRead === false) count++; });
+  return count;
 }
 
 /**

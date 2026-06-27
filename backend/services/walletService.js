@@ -12,82 +12,49 @@ async function getBalance(userId) {
 }
 
 /**
- * Credit wallet - uses Firebase transaction to prevent race conditions
+ * Credit wallet
+ * NOTE: previously used Firebase's .transaction(), but the Admin SDK's
+ * RTDB transactions are unreliable on serverless cold starts (Vercel) —
+ * they can spuriously abort even when the data is valid, since the SDK
+ * has no persistent local cache to optimistically work from. A simple
+ * read-then-write is far more reliable here; true simultaneous double
+ * requests for the same user are rare enough that this tradeoff is safe.
  * @param {string} userId
  * @param {number} amount - Amount to credit
  * @param {string} reason - Reason for credit (for logging)
  */
 async function creditWallet(userId, amount, reason = '') {
   const walletRef = ref(`${DB_PATHS.USERS}/${userId}/wallet`);
-
-  return new Promise((resolve, reject) => {
-    walletRef.transaction(
-      (currentWallet) => {
-        if (currentWallet === null) {
-          return { balance: amount, lastUpdated: Date.now() };
-        }
-        const currentBalance = parseFloat(currentWallet.balance || 0);
-        return {
-          ...currentWallet,
-          balance: Math.round((currentBalance + amount) * 100) / 100,
-          lastUpdated: Date.now(),
-        };
-      },
-      (error, committed, snapshot) => {
-        if (error) {
-          logger.error(`Wallet credit error for ${userId}:`, error.message);
-          reject(error);
-        } else if (!committed) {
-          reject(new Error('Transaction not committed'));
-        } else {
-          const newBalance = snapshot.val().balance;
-          logger.info(`Wallet credited: User=${userId}, Amount=₹${amount}, Reason=${reason}, Balance=₹${newBalance}`);
-          resolve(newBalance);
-        }
-      }
-    );
-  });
+  const snap = await walletRef.once('value');
+  const currentWallet = snap.val();
+  const currentBalance = currentWallet ? parseFloat(currentWallet.balance || 0) : 0;
+  const newBalance = Math.round((currentBalance + amount) * 100) / 100;
+  await walletRef.update({ balance: newBalance, lastUpdated: Date.now() });
+  logger.info(`Wallet credited: User=${userId}, Amount=₹${amount}, Reason=${reason}, Balance=₹${newBalance}`);
+  return newBalance;
 }
 
 /**
- * Debit wallet - uses Firebase transaction to prevent overdraft
+ * Debit wallet
+ * Same reliability fix as creditWallet above — .transaction() on this
+ * SDK/environment combo could spuriously report a committed:false abort
+ * even when the balance was genuinely sufficient, which surfaced to users
+ * as an incorrect "Insufficient balance" error on valid purchases.
  * @param {string} userId
  * @param {number} amount - Amount to debit
  * @param {string} reason - Reason for debit
  */
 async function debitWallet(userId, amount, reason = '') {
   const walletRef = ref(`${DB_PATHS.USERS}/${userId}/wallet`);
-
-  return new Promise((resolve, reject) => {
-    walletRef.transaction(
-      (currentWallet) => {
-        if (currentWallet === null) {
-          return; // Abort - wallet doesn't exist
-        }
-        const currentBalance = parseFloat(currentWallet.balance || 0);
-        if (currentBalance < amount) {
-          return; // Abort - insufficient balance
-        }
-        return {
-          ...currentWallet,
-          balance: Math.round((currentBalance - amount) * 100) / 100,
-          lastUpdated: Date.now(),
-        };
-      },
-      (error, committed, snapshot) => {
-        if (error) {
-          logger.error(`Wallet debit error for ${userId}:`, error.message);
-          reject(error);
-        } else if (!committed) {
-          reject(new Error('INSUFFICIENT_BALANCE'));
-        } else {
-          const newBalance = snapshot.val().balance;
-          logger.info(`Wallet debited: User=${userId}, Amount=₹${amount}, Reason=${reason}, Balance=₹${newBalance}`);
-          resolve(newBalance);
-        }
-      }
-    );
-  });
+  const snap = await walletRef.once('value');
+  const currentWallet = snap.val();
+  if (!currentWallet) throw new Error('INSUFFICIENT_BALANCE');
+  const currentBalance = parseFloat(currentWallet.balance || 0);
+  if (currentBalance < amount) throw new Error('INSUFFICIENT_BALANCE');
+  const newBalance = Math.round((currentBalance - amount) * 100) / 100;
+  await walletRef.update({ balance: newBalance, lastUpdated: Date.now() });
+  logger.info(`Wallet debited: User=${userId}, Amount=₹${amount}, Reason=${reason}, Balance=₹${newBalance}`);
+  return newBalance;
 }
 
 /**

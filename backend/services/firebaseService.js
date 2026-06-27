@@ -376,6 +376,21 @@ async function logActivity(userId, action, details = {}) {
   });
 }
 
+/**
+ * Permanently delete a user record from the database.
+ * NOTE: this removes the Realtime Database profile only — it does NOT
+ * delete their Firebase Authentication account, so they could still sign
+ * in (and a fresh profile would be created on next login, via upsertUser).
+ * Their historical payments/withdrawals are kept for accounting records.
+ */
+async function deleteUser(uid) {
+  const user = await getUser(uid);
+  if (user?.referralCode) {
+    await ref(`${DB_PATHS.REFERRAL_CODES}/${user.referralCode}`).remove();
+  }
+  await ref(`${DB_PATHS.USERS}/${uid}`).remove();
+}
+
 module.exports = {
   // Users
   getUser,
@@ -385,6 +400,7 @@ module.exports = {
   setBanStatus,
   generateReferralCode,
   getUidByReferralCode,
+  deleteUser,
   // Payments
   createPayment,
   updatePaymentStatus,
