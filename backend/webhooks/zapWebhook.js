@@ -10,11 +10,28 @@ const { DB_PATHS, DEFAULT_PLANS } = require('../config/constants');
 const logger              = require('../utils/logger');
 
 async function handleZapWebhook(req, res) {
-  res.status(200).json({ status: 'ok' });
   const { order_id, status, txn_id, amount, pay_amount, utr, environment } = req.body;
-  if (!order_id) { logger.warn('Webhook: missing order_id'); return; }
+  if (!order_id) {
+    logger.warn('Webhook: missing order_id');
+    return res.status(200).json({ status: 'ok' });
+  }
   logger.info(`Webhook: ${order_id} status=${status}`);
-  processWebhookAsync({ order_id, status, txn_id, amount, pay_amount, utr, environment });
+
+  // IMPORTANT (Vercel serverless): we now AWAIT processing before
+  // responding. This used to respond 200 first and then kick off
+  // processWebhookAsync() without awaiting it ("fire and forget") — but
+  // Vercel can freeze/terminate a serverless function's execution
+  // environment right after the response is sent, which can kill that
+  // unawaited work mid-flight (e.g. while still waiting on the Zap
+  // order-status API call or a Firebase write). That could silently drop
+  // the wallet credit / status update for an unpredictable subset of
+  // payments. Awaiting first guarantees processing finishes before the
+  // function instance is allowed to freeze. We still always respond 200
+  // afterwards (per ZapUPI's docs) regardless of outcome — our own
+  // isOrderProcessed duplicate-check safely absorbs any webhook retries.
+  await processWebhookAsync({ order_id, status, txn_id, amount, pay_amount, utr, environment });
+
+  return res.status(200).json({ status: 'ok' });
 }
 
 async function processWebhookAsync(data) {
@@ -28,14 +45,52 @@ async function processWebhookAsync(data) {
     const payment = await firebaseService.getPayment(order_id);
     if (!payment) { logger.error(`Payment not found: ${order_id}`); return; }
 
-    // Verify with Zap API
-    let verifiedStatus = status;
+    // Normalize ZapUPI status strings ('Success' | 'Failed' | 'Pending',
+    // but be defensive about case) into one of these 3 canonical values.
+    const normalize = (s) => {
+      const v = String(s || '').trim().toLowerCase();
+      if (v === 'success') return 'Success';
+      if (v === 'failed') return 'Failed';
+      if (v === 'pending') return 'Pending';
+      return null; // unrecognized
+    };
+
+    // The webhook payload's own status is the authoritative, real-time
+    // signal (Zap only fires this webhook once, on the final Success/Failed
+    // state — per official docs). We double-check it against the
+    // order-status API as an EXTRA confirmation, but that API can lag
+    // behind the webhook by a second or two (eventual consistency on Zap's
+    // side) and report a stale "Pending" even though the webhook already
+    // says "Success". Previously this stale "Pending" silently OVERWROTE
+    // the correct "Success", which then got stored as 'failed' (see
+    // firebaseService.updatePaymentStatus) and permanently locked the
+    // order as processed — so the wallet was never credited and the
+    // customer was shown "Payment Failed" even though they paid
+    // successfully. Fix: only let the verify call override the webhook's
+    // status when it returns a DEFINITIVE Success/Failed; a "Pending" (or
+    // unrecognized) verify result never downgrades an already-final
+    // webhook status.
+    let verifiedStatus = normalize(status);
     try {
       const api = await zapService.getOrderStatus(order_id);
-      verifiedStatus = api.status || status;
+      const apiStatus = normalize(api.status);
+      if (apiStatus === 'Success' || apiStatus === 'Failed') {
+        verifiedStatus = apiStatus;
+      }
     } catch (e) { logger.warn(`API verify failed: ${e.message}`); }
 
     await firebaseService.updatePaymentStatus(order_id, { status: verifiedStatus, txn_id, utr, amount, pay_amount, environment });
+
+    if (verifiedStatus !== 'Success' && verifiedStatus !== 'Failed') {
+      // Still inconclusive (e.g. webhook status was missing/garbled AND the
+      // verify call only returned "Pending"). Do NOT mark as processed —
+      // leave it open so a later webhook retry (or the order-status poll
+      // from pay.html) can still resolve it correctly instead of getting
+      // permanently stuck.
+      logger.warn(`Webhook ${order_id}: inconclusive status (raw="${status}"), leaving unprocessed for retry`);
+      return;
+    }
+
     await firebaseService.markOrderProcessed(order_id);
 
     if (verifiedStatus !== 'Success') {
