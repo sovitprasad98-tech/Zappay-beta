@@ -282,7 +282,7 @@ const getLinkOrderStatus = async (req, res) => {
 
     return response.success(res, 'Status fetched', {
       orderId,
-      status: payment.status, // 'pending' | 'Success' | 'failed' | 'timeout'
+      status: payment.status, // always one of: 'pending' | 'success' | 'failed'
       linkId: payment.linkId,
     });
   } catch (err) {
