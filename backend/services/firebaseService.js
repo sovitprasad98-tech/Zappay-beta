@@ -196,8 +196,21 @@ async function createPayment(orderId, data) {
  * Update payment status (webhook)
  */
 async function updatePaymentStatus(orderId, data) {
+  // IMPORTANT: this used to be a binary `data.status === 'Success' ?
+  // 'success' : 'failed'` check — which meant ANY non-'Success' value,
+  // including a still-genuine 'Pending', got written as 'failed'. That
+  // silently broke real successful payments whenever the caller passed
+  // through a transient 'Pending' (e.g. from the webhook's order-status
+  // double-check racing ahead of Zap's own DB). Now we map all 3 real
+  // states explicitly, and default to 'pending' (not 'failed') for
+  // anything we don't recognize, so we never falsely fail a payment.
+  const normalizedStatus =
+    data.status === 'Success' ? 'success' :
+    data.status === 'Failed'  ? 'failed'  :
+    'pending';
+
   await ref(`${DB_PATHS.PAYMENTS}/${orderId}`).update({
-    status: data.status === 'Success' ? 'success' : 'failed',
+    status: normalizedStatus,
     txnId: data.txn_id || '',
     utr: data.utr || '',
     payAmount: parseFloat(data.pay_amount || data.amount || 0),
