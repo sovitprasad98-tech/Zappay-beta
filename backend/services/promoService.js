@@ -48,9 +48,10 @@ async function applyPromoCode(uid, codeInput) {
 
   await redemptionRef.set({ code, value, redeemedAt: serverTimestamp() });
 
-  // Best-effort usage counter (non-blocking if it fails)
+  // Best-effort usage counter (read-then-write, same reliability fix as wallet)
   try {
-    await ref(`${DB_PATHS.PROMO_CODES}/${code}/usedCount`).transaction((c) => (c || 0) + 1);
+    const counterSnap = await ref(`${DB_PATHS.PROMO_CODES}/${code}/usedCount`).once('value');
+    await ref(`${DB_PATHS.PROMO_CODES}/${code}/usedCount`).set((counterSnap.val() || 0) + 1);
   } catch (e) { /* non-critical */ }
 
   return { code, value };

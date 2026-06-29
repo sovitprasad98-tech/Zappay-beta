@@ -159,19 +159,15 @@ async function checkAndResetMonthlyLinks(userId) {
 
 /**
  * Increment payment link count for user
+ * (same .transaction() reliability fix as walletService — see notes there)
  */
 async function incrementLinkCount(userId) {
   await checkAndResetMonthlyLinks(userId);
   const subRef = ref(`${DB_PATHS.USER_SUBSCRIPTIONS}/${userId}`);
-  return new Promise((resolve, reject) => {
-    subRef.transaction((sub) => {
-      if (!sub) return sub;
-      return { ...sub, paymentLinksUsedThisMonth: (sub.paymentLinksUsedThisMonth || 0) + 1 };
-    }, (err, committed) => {
-      if (err) reject(err);
-      else resolve(committed);
-    });
-  });
+  const snap = await subRef.once('value');
+  const sub = snap.val();
+  if (!sub) return;
+  await subRef.update({ paymentLinksUsedThisMonth: (sub.paymentLinksUsedThisMonth || 0) + 1 });
 }
 
 /**
