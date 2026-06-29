@@ -47,37 +47,54 @@ async function processWebhookAsync(data) {
 
     // Normalize ZapUPI status strings ('Success' | 'Failed' | 'Pending',
     // but be defensive about case) into one of these 3 canonical values.
+    // Also maps 'Cancelled by user', 'Rejected', 'Declined', etc. → 'Failed'
+    // so that any non-standard cancel/reject string from the ZapUPI UI never
+    // falls through as null and accidentally gets treated as inconclusive.
     const normalize = (s) => {
       const v = String(s || '').trim().toLowerCase();
       if (v === 'success') return 'Success';
-      if (v === 'failed') return 'Failed';
+      if (v === 'failed'
+        || v.startsWith('cancel')   // 'Cancelled by user', 'cancelled', ...
+        || v.startsWith('reject')   // 'Rejected'
+        || v.startsWith('decline')  // 'Declined'
+        || v.startsWith('expire')   // 'Expired'
+      ) return 'Failed';
       if (v === 'pending') return 'Pending';
-      return null; // unrecognized
+      return null; // unrecognized — treated as inconclusive
     };
 
     // The webhook payload's own status is the authoritative, real-time
-    // signal (Zap only fires this webhook once, on the final Success/Failed
-    // state — per official docs). We double-check it against the
-    // order-status API as an EXTRA confirmation, but that API can lag
-    // behind the webhook by a second or two (eventual consistency on Zap's
-    // side) and report a stale "Pending" even though the webhook already
-    // says "Success". Previously this stale "Pending" silently OVERWROTE
-    // the correct "Success", which then got stored as 'failed' (see
-    // firebaseService.updatePaymentStatus) and permanently locked the
-    // order as processed — so the wallet was never credited and the
-    // customer was shown "Payment Failed" even though they paid
-    // successfully. Fix: only let the verify call override the webhook's
-    // status when it returns a DEFINITIVE Success/Failed; a "Pending" (or
-    // unrecognized) verify result never downgrades an already-final
-    // webhook status.
+    // signal (Zap only fires once, on the final Success/Failed state).
+    //
+    // CRITICAL BUG FIX: Previously the API verify ran unconditionally and
+    // could override ANY webhook status — including a definitive 'Failed'.
+    // This caused: webhook='Failed' (user cancelled) + API='Success' (stale
+    // due to ZapUPI eventual-consistency lag) → verifiedStatus wrongly set
+    // to 'Success' → wallet credited + plan activated for a CANCELLED payment.
+    //
+    // Fix: API verify is used ONLY as a fallback when webhook status is
+    // genuinely inconclusive (null or Pending). A definitive 'Failed' or
+    // 'Success' from the webhook is NEVER overridden by the API verify.
     let verifiedStatus = normalize(status);
-    try {
-      const api = await zapService.getOrderStatus(order_id);
-      const apiStatus = normalize(api.status);
-      if (apiStatus === 'Success' || apiStatus === 'Failed') {
-        verifiedStatus = apiStatus;
-      }
-    } catch (e) { logger.warn(`API verify failed: ${e.message}`); }
+    if (verifiedStatus !== 'Success' && verifiedStatus !== 'Failed') {
+      // Inconclusive — use API as fallback
+      try {
+        const api = await zapService.getOrderStatus(order_id);
+        const apiStatus = normalize(api.status);
+        if (apiStatus === 'Success' || apiStatus === 'Failed') {
+          verifiedStatus = apiStatus;
+        }
+      } catch (e) { logger.warn(`API verify failed: ${e.message}`); }
+    } else {
+      // Webhook gave definitive answer — log API mismatch for debugging only
+      try {
+        const api = await zapService.getOrderStatus(order_id);
+        const apiStatus = normalize(api.status);
+        if (apiStatus && apiStatus !== verifiedStatus) {
+          logger.warn(`Webhook/API mismatch ${order_id}: webhook=${verifiedStatus}, API=${apiStatus} — trusting webhook`);
+        }
+      } catch (e) { /* non-critical — already have definitive status */ }
+    }
 
     await firebaseService.updatePaymentStatus(order_id, { status: verifiedStatus, txn_id, utr, amount, pay_amount, environment });
 
