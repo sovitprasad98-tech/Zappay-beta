@@ -148,10 +148,19 @@ async function handleLinkPayment(payment, grossAmount, orderId, utr) {
   const credit = Math.min(grossAmount, available);
   await walletService.creditWallet(payment.userId, credit, `Link ${payment.linkId}`);
 
-  await ref(`${DB_PATHS.PAYMENT_LINKS}/${payment.linkId}`).transaction(l => {
-    if (!l) return l;
-    return { ...l, paymentCount: (l.paymentCount||0)+1, totalCollected: (l.totalCollected||0)+grossAmount, lastPaidAt: Date.now() };
-  });
+  // Update link stats (paymentCount, totalCollected) — read-then-write,
+  // same .transaction() reliability fix as walletService. This runs on
+  // every successful pay.html payment, so it's directly in that critical path.
+  const linkRef = ref(`${DB_PATHS.PAYMENT_LINKS}/${payment.linkId}`);
+  const linkSnap = await linkRef.once('value');
+  const linkData = linkSnap.val();
+  if (linkData) {
+    await linkRef.update({
+      paymentCount: (linkData.paymentCount || 0) + 1,
+      totalCollected: (linkData.totalCollected || 0) + grossAmount,
+      lastPaidAt: Date.now(),
+    });
+  }
 
   await notificationService.createNotification(payment.userId, {
     title: '💰 Payment Received via Link',
