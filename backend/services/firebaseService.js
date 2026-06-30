@@ -123,7 +123,7 @@ async function upsertUser(uid, data) {
  * Update user profile
  */
 async function updateUserProfile(uid, data) {
-  const allowed = ['displayName', 'phone', 'upiId', 'bankDetails'];
+  const allowed = ['displayName', 'phone', 'upiId', 'upiHolderName', 'bankDetails'];
   const update = {};
   allowed.forEach((key) => {
     if (data[key] !== undefined) update[key] = data[key];
@@ -295,19 +295,30 @@ async function unmarkOrderProcessed(orderId) {
 async function createWithdrawal(userId, data) {
   const withdrawalRef = ref(DB_PATHS.WITHDRAWALS).push();
   const id = withdrawalRef.key;
-  await withdrawalRef.set({
+  const method = data.method === 'bank' ? 'bank' : 'upi';
+  const record = {
     id,
     userId,
+    method,
     amount: parseFloat(data.amount),
     commission: parseFloat(data.commission),
     netAmount: parseFloat(data.netAmount),
-    upiId: data.upiId,
-    accountName: data.accountName || '',
     status: 'pending',
     adminNote: '',
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  });
+  };
+  if (method === 'bank') {
+    record.accountNumber = data.accountNumber;
+    record.ifscCode = data.ifscCode;
+    record.accountHolderName = data.accountHolderName;
+    record.accountName = data.accountHolderName || ''; // legacy field, kept for older code paths that still read it
+  } else {
+    record.upiId = data.upiId;
+    record.upiHolderName = data.upiHolderName || '';
+    record.accountName = data.upiHolderName || ''; // legacy field, kept for older code paths that still read it
+  }
+  await withdrawalRef.set(record);
   return id;
 }
 
