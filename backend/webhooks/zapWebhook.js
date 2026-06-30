@@ -37,10 +37,31 @@ async function handleZapWebhook(req, res) {
 async function processWebhookAsync(data) {
   const { order_id, status, txn_id, amount, pay_amount, utr, environment } = data;
   try {
-    // Duplicate check
+    // ── CRITICAL FIX: close the duplicate-webhook race window ──────────
+    // Previously the duplicate-check (isOrderProcessed) happened here, but
+    // the actual claim (markOrderProcessed) only happened at the very END
+    // of this function — AFTER several awaited Firebase calls AND 1-2
+    // external HTTP calls to ZapUPI's order-status API (each potentially
+    // taking hundreds of ms, longer on a cold serverless start). Payment
+    // gateways commonly fire a webhook more than once for the same order
+    // (built-in retries, or a redirect-callback racing the server-side
+    // webhook). When two such calls for the SAME order_id arrived close
+    // together, BOTH could pass this isOrderProcessed check — since
+    // neither had reached markOrderProcessed yet — and BOTH would then
+    // proceed to credit the wallet / activate the subscription / create
+    // notifications. Net effect: one real payment got processed (and
+    // credited) TWICE, with duplicate notifications too.
+    //
+    // Fix: claim the order_id IMMEDIATELY after the duplicate check,
+    // before any further async work — shrinking the race window from
+    // "several DB writes + external API calls" down to a single
+    // read-then-write. If the status later turns out to be genuinely
+    // inconclusive, the claim is released (unmarkOrderProcessed) so a
+    // legitimate later retry can still resolve it.
     if (await firebaseService.isOrderProcessed(order_id)) {
       logger.warn(`Duplicate ignored: ${order_id}`); return;
     }
+    await firebaseService.markOrderProcessed(order_id);
 
     const payment = await firebaseService.getPayment(order_id);
     if (!payment) { logger.error(`Payment not found: ${order_id}`); return; }
@@ -100,15 +121,15 @@ async function processWebhookAsync(data) {
 
     if (verifiedStatus !== 'Success' && verifiedStatus !== 'Failed') {
       // Still inconclusive (e.g. webhook status was missing/garbled AND the
-      // verify call only returned "Pending"). Do NOT mark as processed —
-      // leave it open so a later webhook retry (or the order-status poll
-      // from pay.html) can still resolve it correctly instead of getting
-      // permanently stuck.
-      logger.warn(`Webhook ${order_id}: inconclusive status (raw="${status}"), leaving unprocessed for retry`);
+      // verify call only returned "Pending"). We already claimed this
+      // order_id early (above) to block concurrent duplicates — but since
+      // we can't yet resolve it, release that claim so a later webhook
+      // retry (or the order-status poll from pay.html) can still resolve
+      // it correctly instead of being permanently stuck.
+      await firebaseService.unmarkOrderProcessed(order_id);
+      logger.warn(`Webhook ${order_id}: inconclusive status (raw="${status}"), released claim for retry`);
       return;
     }
-
-    await firebaseService.markOrderProcessed(order_id);
 
     if (verifiedStatus !== 'Success') {
       await notificationService.createNotification(payment.userId, {
@@ -145,6 +166,11 @@ async function processWebhookAsync(data) {
 
   } catch (err) {
     logger.error(`Webhook error ${order_id}:`, err.message);
+    // NOTE: if the order_id was already claimed (above) and something
+    // failed AFTER that — e.g. a transient Firebase error mid-credit — we
+    // deliberately do NOT release the claim here. Retrying from scratch
+    // could double-credit a wallet that may have already been partially
+    // credited. The error is logged for manual investigation instead.
   }
 }
 
