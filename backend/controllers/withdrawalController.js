@@ -7,9 +7,16 @@ const response = require('../helpers/response');
 const logger = require('../utils/logger');
 const subscriptionService = require('../services/subscriptionService');
 
+const UPI_RE  = /^[\w.-]+@[\w.-]+$/;
+const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+const ACC_RE  = /^\d{9,18}$/;
+
 /**
  * POST /api/withdrawal/request
- * Submit a withdrawal request
+ * Submit a withdrawal request. Supports two methods:
+ *   method = 'upi'  -> requires upiId, upiHolderName
+ *   method = 'bank' -> requires accountNumber, ifscCode, accountHolderName
+ * (defaults to 'upi' if not provided, for backward compatibility)
  */
 const requestWithdrawal = async (req, res) => {
   try {
@@ -18,10 +25,38 @@ const requestWithdrawal = async (req, res) => {
       return response.error(res, 'Validation failed', 400, errors.array());
     }
 
-    const { amount, upiId, accountName } = req.body;
     const userId = req.user.uid;
+    const method = req.body.method === 'bank' ? 'bank' : 'upi';
     // 'amount' is the NET amount the user wants to actually receive in hand.
-    const netAmount = parseFloat(amount);
+    const netAmount = parseFloat(req.body.amount);
+
+    // Per-method field validation. Kept here (rather than as a rigid
+    // declarative express-validator chain) since which fields are required
+    // depends on the chosen method.
+    let upiId = '', upiHolderName = '', accountNumber = '', ifscCode = '', accountHolderName = '';
+    if (method === 'upi') {
+      upiId = (req.body.upiId || '').trim();
+      upiHolderName = (req.body.upiHolderName || '').trim();
+      if (!upiId || !UPI_RE.test(upiId)) {
+        return response.error(res, 'Please enter a valid UPI ID (e.g. name@bank)');
+      }
+      if (!upiHolderName) {
+        return response.error(res, 'Please enter the UPI holder name');
+      }
+    } else {
+      accountNumber = (req.body.accountNumber || '').replace(/\s+/g, '');
+      ifscCode = (req.body.ifscCode || '').trim().toUpperCase();
+      accountHolderName = (req.body.accountHolderName || '').trim();
+      if (!ACC_RE.test(accountNumber)) {
+        return response.error(res, 'Please enter a valid account number (9-18 digits)');
+      }
+      if (!IFSC_RE.test(ifscCode)) {
+        return response.error(res, 'Please enter a valid IFSC code (e.g. HDFC0001234)');
+      }
+      if (!accountHolderName) {
+        return response.error(res, 'Please enter the account holder name');
+      }
+    }
 
     // Get platform settings
     const settings = await firebaseService.getSettings();
@@ -75,14 +110,18 @@ const requestWithdrawal = async (req, res) => {
       amount: requiredAmount,
       commission,
       netAmount,
-      upiId: upiId.trim(),
-      accountName: accountName?.trim() || '',
+      method,
+      upiId,
+      upiHolderName,
+      accountNumber,
+      ifscCode,
+      accountHolderName,
     });
 
-    // Notify user
+    const methodLabel = method === 'bank' ? 'Bank Transfer' : 'UPI';
     await notificationService.createNotification(userId, {
       title: '📤 Withdrawal Request Submitted',
-      message: `Your withdrawal request for ₹${netAmount} (₹${requiredAmount} held incl. ${commissionPercent}% commission) has been submitted and is under review.`,
+      message: `Your ${methodLabel} withdrawal request for ₹${netAmount} (₹${requiredAmount} held incl. ${commissionPercent}% commission) has been submitted and is under review.`,
       type: 'withdrawal',
     });
 
@@ -90,16 +129,17 @@ const requestWithdrawal = async (req, res) => {
       withdrawalId,
       amount: requiredAmount,
       netAmount,
-      upiId,
+      method,
     });
 
-    logger.info(`Withdrawal requested: ${withdrawalId} by ${userId} for ₹${netAmount} (held ₹${requiredAmount})`);
+    logger.info(`Withdrawal requested: ${withdrawalId} by ${userId} for ₹${netAmount} via ${method} (held ₹${requiredAmount})`);
 
     return response.success(res, 'Withdrawal request submitted successfully', {
       withdrawalId,
       amount: requiredAmount,
       commission,
       netAmount,
+      method,
       status: 'pending',
     });
 
@@ -127,13 +167,9 @@ const requestWithdrawalValidation = [
   body('amount')
     .notEmpty().withMessage('Amount is required')
     .isFloat({ min: 1 }).withMessage('Invalid amount'),
-  body('upiId')
-    .notEmpty().withMessage('UPI ID is required')
-    .matches(/^[\w.-]+@[\w.-]+$/).withMessage('Invalid UPI ID format'),
-  body('accountName')
+  body('method')
     .optional()
-    .isLength({ max: 100 }).withMessage('Account name too long')
-    .trim().escape(),
+    .isIn(['upi', 'bank']).withMessage('Invalid withdrawal method'),
 ];
 
 module.exports = {

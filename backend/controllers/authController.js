@@ -93,6 +93,8 @@ const getMe = async (req, res) => {
       photoURL: user.photoURL,
       phone: user.phone || '',
       upiId: user.upiId || '',
+      upiHolderName: user.upiHolderName || '',
+      bankDetails: user.bankDetails || null,
       role: user.role,
       walletBalance: user.wallet?.balance || 0,
       createdAt: user.createdAt,
