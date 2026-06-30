@@ -132,11 +132,22 @@ async function processWebhookAsync(data) {
     }
 
     if (verifiedStatus !== 'Success') {
-      await notificationService.createNotification(payment.userId, {
-        title: '❌ Payment Failed',
-        message: `Payment of ₹${amount} failed. Order: ${order_id}`,
-        type: 'payment',
-      });
+      // Distinguish WHO this failed payment was for — previously every
+      // failure (the account owner's own top-up, a subscription purchase,
+      // AND a customer's failed attempt to pay the owner's payment link)
+      // produced the exact same generic "Payment Failed" wording, so the
+      // owner couldn't tell from the notification alone whether it was
+      // their own money or a customer's attempt that didn't go through.
+      let title = '❌ Payment Failed';
+      let message = `Your payment of ₹${amount} failed. Order: ${order_id}`;
+      if (payment.type === 'subscription' && payment.planId) {
+        title = '❌ Subscription Payment Failed';
+        message = `Your plan upgrade payment of ₹${amount} failed. Order: ${order_id}`;
+      } else if (payment.linkId) {
+        title = '⚠️ Payment Attempt Failed';
+        message = `A customer's payment of ₹${amount} via your payment link did not go through. Order: ${order_id}`;
+      }
+      await notificationService.createNotification(payment.userId, { title, message, type: 'payment' });
       return;
     }
 
