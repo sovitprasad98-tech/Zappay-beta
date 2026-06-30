@@ -32,8 +32,10 @@ async function getUserNotifications(userId, limit = 30) {
   const snap = await ref(`${DB_PATHS.NOTIFICATIONS}/${userId}`).once('value');
   if (!snap.exists()) return [];
   const notifs = [];
-  snap.forEach((child) => notifs.push(child.val()));
-  notifs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  // Defensive: skip any null/malformed child so one bad record can't
+  // affect the rest of the list.
+  snap.forEach((child) => { const v = child.val(); if (v) notifs.push(v); });
+  notifs.sort((a, b) => (Number(b?.createdAt) || 0) - (Number(a?.createdAt) || 0));
   return notifs.slice(0, limit);
 }
 
@@ -66,7 +68,7 @@ async function getUnreadCount(userId) {
   const snap = await ref(`${DB_PATHS.NOTIFICATIONS}/${userId}`).once('value');
   if (!snap.exists()) return 0;
   let count = 0;
-  snap.forEach((child) => { if (child.val().isRead === false) count++; });
+  snap.forEach((child) => { const v = child.val(); if (v && v.isRead === false) count++; });
   return count;
 }
 

@@ -273,6 +273,17 @@ async function markOrderProcessed(orderId) {
 }
 
 /**
+ * Release an early claim made by markOrderProcessed — used ONLY when the
+ * webhook's status turned out to be genuinely inconclusive (Pending /
+ * unrecognized) after claiming early, so a later webhook retry or
+ * order-status poll can still resolve this order instead of being
+ * permanently blocked by our own duplicate-check.
+ */
+async function unmarkOrderProcessed(orderId) {
+  await ref(`${DB_PATHS.PROCESSED_ORDERS}/${orderId}`).remove();
+}
+
+/**
  * =============================
  * WITHDRAWAL OPERATIONS
  * =============================
@@ -422,6 +433,7 @@ module.exports = {
   getAllPayments,
   isOrderProcessed,
   markOrderProcessed,
+  unmarkOrderProcessed,
   // Withdrawals
   createWithdrawal,
   updateWithdrawalStatus,
