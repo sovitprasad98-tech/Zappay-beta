@@ -46,7 +46,7 @@ async function getAllPlansAdmin() {
   const snap = await ref(DB_PATHS.PLANS).orderByChild('displayOrder').once('value');
   if (!snap.exists()) return [];
   const plans = [];
-  snap.forEach((child) => plans.push({ id: child.key, ...child.val() }));
+  snap.forEach((child) => { plans.push({ id: child.key, ...child.val() }); });
   return plans.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
 }
 
