@@ -107,6 +107,25 @@ const toggleBan = async (req, res) => {
 };
 
 /**
+ * POST /api/admin/users/delete-unverified
+ * Bulk-deletes accounts with no name, no email, AND no wallet balance in
+ * one shot. Any account with at least one of those three is untouched.
+ */
+const deleteUnverifiedUsers = async (req, res) => {
+  try {
+    const deletedUids = await firebaseService.deleteUnverifiedUsers();
+    logger.info(`${deletedUids.length} unverified users deleted by admin ${req.user.uid}`);
+    if (deletedUids.length > 0) {
+      await firebaseService.logActivity(req.user.uid, 'BULK_DELETE_UNVERIFIED', { count: deletedUids.length });
+    }
+    return response.success(res, `${deletedUids.length} unverified user(s) deleted`, { deletedCount: deletedUids.length, deletedUids });
+  } catch (err) {
+    logger.error('Delete unverified users error:', err.message);
+    return response.serverError(res, err.message);
+  }
+};
+
+/**
  * DELETE /api/admin/users/:uid
  * Permanently removes a user's profile from the database.
  */
@@ -346,6 +365,7 @@ module.exports = {
   getUserDetail,
   toggleBan,
   deleteUser,
+  deleteUnverifiedUsers,
   adjustWallet,
   adjustWalletValidation,
   getAllPayments,
