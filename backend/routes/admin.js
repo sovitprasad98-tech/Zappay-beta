@@ -13,6 +13,7 @@ router.get('/users', admin.getUsers);
 router.get('/users/:uid', admin.getUserDetail);
 router.post('/users/:uid/ban', admin.toggleBan);
 router.delete('/users/:uid', admin.deleteUser);
+router.delete('/users-unverified', admin.deleteUnverifiedUsers);
 router.post('/wallet/adjust', admin.adjustWalletValidation, admin.adjustWallet);
 router.get('/payments', admin.getAllPayments);
 router.get('/withdrawals', admin.getAllWithdrawals);
