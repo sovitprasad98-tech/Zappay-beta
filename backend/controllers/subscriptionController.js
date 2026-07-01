@@ -268,7 +268,7 @@ const adminGetPaymentLinks = async (req, res) => {
   try {
     const snap = await ref(DB_PATHS.PAYMENT_LINKS).orderByChild('createdAt').limitToLast(200).once('value');
     const links = [];
-    if (snap.exists()) snap.forEach(c => links.push(c.val()));
+    if (snap.exists()) snap.forEach(c => { links.push(c.val()); });
     return response.success(res, 'Payment links fetched', { links: links.reverse(), total: links.length });
   } catch (err) {
     return response.success(res, 'Payment links fetched', { links: [], total: 0 });

@@ -31,7 +31,7 @@ const adminGetPromoCodes = async (req, res) => {
   try {
     const snap = await ref(DB_PATHS.PROMO_CODES).once('value');
     const codes = [];
-    if (snap.exists()) snap.forEach((c) => codes.push(c.val()));
+    if (snap.exists()) snap.forEach((c) => { codes.push(c.val()); });
     codes.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     return response.success(res, 'Promo codes fetched', { codes });
   } catch (err) {

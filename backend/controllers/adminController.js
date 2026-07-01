@@ -318,7 +318,9 @@ const getAllReferrals = async (req, res) => {
     const referrals = [];
     if (snap.exists()) {
       snap.forEach((referrerSnap) => {
-        referrerSnap.forEach((r) => referrals.push(r.val()));
+        // Block body — forEach cancels iteration if the callback returns
+        // truthy, and Array.push() returns a truthy length.
+        referrerSnap.forEach((r) => { referrals.push(r.val()); });
       });
     }
     referrals.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -329,6 +331,50 @@ const getAllReferrals = async (req, res) => {
       completed: referrals.filter((r) => r.status === 'completed').length,
       totalCommissionPaid,
     });
+  } catch (err) {
+    return response.serverError(res, err.message);
+  }
+};
+
+/**
+ * DELETE /api/admin/users-unverified
+ * Bulk-delete "unverified" placeholder users in a single action.
+ * A user only qualifies for deletion if ALL three are true:
+ *   - no display name
+ *   - no email
+ *   - zero wallet balance
+ * Anyone who has even ONE of those (a name, an email, or a non-zero
+ * balance) is left completely untouched. Admin accounts are never touched.
+ */
+const deleteUnverifiedUsers = async (req, res) => {
+  try {
+    const users = await firebaseService.getAllUsers();
+
+    const isUnverified = (u) => {
+      if (u.role === 'admin') return false;
+      const hasName = !!(u.displayName && String(u.displayName).trim());
+      const hasEmail = !!(u.email && String(u.email).trim());
+      const hasBalance = (u.walletBalance || 0) > 0;
+      return !hasName && !hasEmail && !hasBalance;
+    };
+
+    const targets = users.filter(isUnverified);
+
+    for (const u of targets) {
+      await firebaseService.deleteUser(u.uid);
+    }
+
+    logger.info(`Bulk-deleted ${targets.length} unverified user(s) by admin ${req.user.uid}`);
+    await firebaseService.logActivity(req.user.uid, 'BULK_DELETE_UNVERIFIED_USERS', {
+      count: targets.length,
+      uids: targets.map((u) => u.uid),
+    });
+
+    return response.success(
+      res,
+      `Deleted ${targets.length} unverified user${targets.length === 1 ? '' : 's'}`,
+      { deletedCount: targets.length }
+    );
   } catch (err) {
     return response.serverError(res, err.message);
   }
@@ -346,6 +392,7 @@ module.exports = {
   getUserDetail,
   toggleBan,
   deleteUser,
+  deleteUnverifiedUsers,
   adjustWallet,
   adjustWalletValidation,
   getAllPayments,
