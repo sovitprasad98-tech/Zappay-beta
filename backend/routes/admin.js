@@ -10,6 +10,7 @@ router.use(authenticate, requireAdmin);
 
 router.get('/dashboard', admin.getDashboard);
 router.get('/users', admin.getUsers);
+router.post('/users/delete-unverified', admin.deleteUnverifiedUsers);
 router.get('/users/:uid', admin.getUserDetail);
 router.post('/users/:uid/ban', admin.toggleBan);
 router.delete('/users/:uid', admin.deleteUser);
