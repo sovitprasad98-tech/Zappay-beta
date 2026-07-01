@@ -15,7 +15,7 @@ async function getReferralData(uid) {
 
   const snap = await ref(`${DB_PATHS.REFERRALS}/${uid}`).once('value');
   const referrals = [];
-  if (snap.exists()) snap.forEach((child) => { referrals.push(child.val()); });
+  if (snap.exists()) snap.forEach((child) => referrals.push(child.val()));
   referrals.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
   const totalIncome = referrals.reduce((s, r) => s + (r.commission || 0), 0);

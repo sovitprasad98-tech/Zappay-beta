@@ -239,12 +239,7 @@ async function getUserPayments(userId, limit = 50) {
 
   if (!snap.exists()) return [];
   const payments = [];
-  // NOTE: DataSnapshot.forEach() cancels iteration early if the callback
-  // returns a truthy value. Array.push() returns the new array length,
-  // which is truthy from the very first element — so a shorthand arrow
-  // `(child) => payments.push(child.val())` would silently stop after
-  // just ONE item. Always use a block body here so nothing is returned.
-  snap.forEach((child) => { payments.push(child.val()); });
+  snap.forEach((child) => payments.push(child.val()));
   return payments.sort((a, b) => b.createdAt - a.createdAt);
 }
 
@@ -258,7 +253,7 @@ async function getAllPayments(limit = 100) {
     .once('value');
   if (!snap.exists()) return [];
   const payments = [];
-  snap.forEach((child) => { payments.push(child.val()); });
+  snap.forEach((child) => payments.push(child.val()));
   return payments.sort((a, b) => b.createdAt - a.createdAt);
 }
 
@@ -348,8 +343,7 @@ async function getUserWithdrawals(userId) {
     .once('value');
   if (!snap.exists()) return [];
   const list = [];
-  // See note above — block body prevents forEach from stopping after item 1.
-  snap.forEach((child) => { list.push(child.val()); });
+  snap.forEach((child) => list.push(child.val()));
   return list.sort((a, b) => b.createdAt - a.createdAt);
 }
 
@@ -360,7 +354,7 @@ async function getAllWithdrawals() {
   const snap = await ref(DB_PATHS.WITHDRAWALS).once('value');
   if (!snap.exists()) return [];
   const list = [];
-  snap.forEach((child) => { list.push(child.val()); });
+  snap.forEach((child) => list.push(child.val()));
   return list.sort((a, b) => b.createdAt - a.createdAt);
 }
 
