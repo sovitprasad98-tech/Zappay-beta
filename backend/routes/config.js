@@ -11,6 +11,10 @@ const response = require('../helpers/response');
 const firebaseService = require('../services/firebaseService');
 
 router.get('/', async (req, res) => {
+  // Never let a CDN/proxy/browser cache this — maintenanceMode must always
+  // reflect the LIVE settings value, not a stale snapshot from a few
+  // minutes ago when the admin toggle gets flipped back off.
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
   const required = [
     'FIREBASE_API_KEY',
     'FIREBASE_AUTH_DOMAIN',
@@ -28,10 +32,12 @@ router.get('/', async (req, res) => {
 
   let socialLinks = {};
   let maintenanceMode = false;
+  let supportEmail = '';
   try {
     const settings = await firebaseService.getSettings();
     socialLinks = settings.socialLinks || {};
     maintenanceMode = !!settings.maintenanceMode;
+    supportEmail = settings.supportEmail || '';
   } catch (e) { /* settings unreachable — return empty social links rather than failing config entirely */ }
 
   return response.success(res, 'Config fetched', {
@@ -47,6 +53,7 @@ router.get('/', async (req, res) => {
     siteName: process.env.SITE_NAME || 'ZapPay',
     socialLinks,
     maintenanceMode,
+    supportEmail,
   });
 });
 
