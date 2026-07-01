@@ -426,6 +426,31 @@ async function deleteUser(uid) {
   await ref(`${DB_PATHS.USERS}/${uid}`).remove();
 }
 
+/**
+ * Delete all "unverified" users in one shot — defined as accounts with
+ * NO name, NO email, AND NO wallet balance (all three missing/empty/zero).
+ * Any user who has at least one of these three is left completely
+ * untouched. Typically these are abandoned/incomplete signups.
+ * Returns the list of uids that were deleted.
+ */
+async function deleteUnverifiedUsers() {
+  const snap = await ref(DB_PATHS.USERS).once('value');
+  if (!snap.exists()) return [];
+  const toDelete = [];
+  snap.forEach((child) => {
+    const u = child.val();
+    if (!u) return;
+    const noName = !u.displayName || !String(u.displayName).trim();
+    const noEmail = !u.email || !String(u.email).trim();
+    const noBalance = !u.wallet?.balance || u.wallet.balance <= 0;
+    if (noName && noEmail && noBalance) toDelete.push(child.key);
+  });
+  for (const uid of toDelete) {
+    await deleteUser(uid);
+  }
+  return toDelete;
+}
+
 module.exports = {
   // Users
   getUser,
@@ -436,6 +461,7 @@ module.exports = {
   generateReferralCode,
   getUidByReferralCode,
   deleteUser,
+  deleteUnverifiedUsers,
   // Payments
   createPayment,
   updatePaymentStatus,
