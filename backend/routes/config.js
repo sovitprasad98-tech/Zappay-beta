@@ -27,11 +27,9 @@ router.get('/', async (req, res) => {
   }
 
   let socialLinks = {};
-  let maintenanceMode = false;
   try {
     const settings = await firebaseService.getSettings();
     socialLinks = settings.socialLinks || {};
-    maintenanceMode = !!settings.maintenanceMode;
   } catch (e) { /* settings unreachable — return empty social links rather than failing config entirely */ }
 
   return response.success(res, 'Config fetched', {
@@ -46,7 +44,6 @@ router.get('/', async (req, res) => {
     },
     siteName: process.env.SITE_NAME || 'ZapPay',
     socialLinks,
-    maintenanceMode,
   });
 });
 
